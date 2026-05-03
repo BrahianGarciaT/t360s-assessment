@@ -2,7 +2,9 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsNotEmpty,
   IsNumber,
+  IsOptional,
   IsString,
   Min,
   ValidateNested,
@@ -11,6 +13,10 @@ import {
 export class OrderItemDto {
   @IsString()
   productId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  productName!: string;
 
   @IsNumber()
   @Min(1)
@@ -30,4 +36,8 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
   items!: OrderItemDto[];
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

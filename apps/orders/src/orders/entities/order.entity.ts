@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -9,6 +10,7 @@ import { OrderStatus } from '@app/shared';
 
 export interface OrderItem {
   productId: string;
+  productName: string;
   quantity: number;
   price: number;
 }
@@ -29,6 +31,17 @@ export class Order {
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   totalAmount!: number;
+
+  @Column({ type: 'text', nullable: true })
+  notes!: string | null;
+
+  @Index('IDX_ORDERS_SEARCH_VECTOR')
+  @Column({
+    type: 'tsvector',
+    nullable: true,
+    select: false,
+  })
+  searchVector!: unknown;
 
   @CreateDateColumn()
   createdAt!: Date;
