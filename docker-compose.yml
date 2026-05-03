@@ -29,6 +29,64 @@ services:
       timeout: 5s
       retries: 5
 
+  orders:
+    build:
+      context: .
+      dockerfile: apps/orders/Dockerfile
+    environment:
+      ORDERS_HTTP_PORT: ${ORDERS_HTTP_PORT}
+      ORDERS_DB_HOST: ${ORDERS_DB_HOST}
+      ORDERS_DB_PORT: ${ORDERS_DB_PORT}
+      ORDERS_DB_USER: ${ORDERS_DB_USER}
+      ORDERS_DB_PASSWORD: ${ORDERS_DB_PASSWORD}
+      ORDERS_DB_NAME: ${ORDERS_DB_NAME}
+      AUDIT_TCP_HOST: ${AUDIT_TCP_HOST}
+      AUDIT_TCP_PORT: ${AUDIT_TCP_PORT}
+    ports:
+      - '3000:3000'
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      audit:
+        condition: service_healthy
+
+  audit:
+    build:
+      context: .
+      dockerfile: apps/audit/Dockerfile
+    environment:
+      AUDIT_HTTP_PORT: ${AUDIT_HTTP_PORT}
+      AUDIT_TCP_PORT: ${AUDIT_TCP_PORT}
+      AUDIT_MONGO_URI: ${AUDIT_MONGO_URI}
+    ports:
+      - '3001:3001'
+      - '4001:4001'
+    networks:
+      - app-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - 'CMD'
+        - 'node'
+        - '-e'
+        - |
+          const net = require('net');
+          let done = 0;
+          const check = (port) => new Promise(res => {
+            const c = net.createConnection({ port, host: 'localhost' });
+            c.on('connect', () => { c.destroy(); done++; res(); });
+            c.on('error', res);
+          });
+          Promise.all([check(3001), check(4001)]).then(() => process.exit(done === 2 ? 0 : 1));
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
 networks:
   app-network:
     driver: bridge

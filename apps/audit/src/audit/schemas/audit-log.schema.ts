@@ -6,19 +6,19 @@ export type AuditLogDocument = HydratedDocument<AuditLog>;
 @Schema()
 export class AuditLog {
   @Prop({ required: true, index: true })
-  orderId: string;
+  orderId!: string;
 
   @Prop({ type: String, default: null })
-  fromStatus: string | null;
+  fromStatus!: string | null;
 
   @Prop({ required: true })
-  toStatus: string;
+  toStatus!: string;
 
   @Prop({ required: true })
-  timestamp: Date;
+  timestamp!: Date;
 
   @Prop({ type: Object, default: {} })
-  metadata: Record<string, any>;
+  metadata!: Record<string, any>;
 }
 
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLog);

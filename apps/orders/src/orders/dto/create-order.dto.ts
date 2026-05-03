@@ -10,28 +10,24 @@ import {
 
 export class OrderItemDto {
   @IsString()
-  productId: string;
+  productId!: string;
 
   @IsNumber()
   @Min(1)
-  quantity: number;
+  quantity!: number;
 
   @IsNumber()
   @Min(0)
-  price: number;
+  price!: number;
 }
 
 export class CreateOrderDto {
   @IsString()
-  userId: string;
+  userId!: string;
 
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
-  items: OrderItemDto[];
-
-  @IsNumber()
-  @Min(1)
-  stock: number;
+  items!: OrderItemDto[];
 }

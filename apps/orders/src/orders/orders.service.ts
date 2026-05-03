@@ -12,7 +12,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { Order } from './entities/order.entity';
-import { AUDIT_TCP_CLIENT } from './orders.module';
+import { AUDIT_TCP_CLIENT } from './orders.constants';
 
 const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -32,10 +32,6 @@ export class OrdersService {
   ) {}
 
   async createOrder(dto: CreateOrderDto): Promise<Order> {
-    if (dto.stock < 1) {
-      throw new BadRequestException('Stock must be at least 1');
-    }
-
     const totalAmount = dto.items.reduce(
       (sum, item) => sum + item.quantity * item.price,
       0,
@@ -44,7 +40,6 @@ export class OrdersService {
     const order = await this.ordersRepository.create({
       userId: dto.userId,
       items: dto.items,
-      stock: dto.stock,
       totalAmount,
       status: OrderStatus.PENDING,
     });

@@ -6,8 +6,7 @@ import { Order } from './entities/order.entity';
 import { OrdersRepository } from './orders.repository';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
-
-export const AUDIT_TCP_CLIENT = 'AUDIT_TCP_CLIENT';
+import { AUDIT_TCP_CLIENT } from './orders.constants';
 
 @Module({
   imports: [

@@ -3,18 +3,18 @@ import { IsDate, IsOptional, IsString } from 'class-validator';
 
 export class CreateAuditLogDto {
   @IsString()
-  orderId: string;
+  orderId!: string;
 
   @IsOptional()
   @IsString()
-  fromStatus: string | null;
+  fromStatus!: string | null;
 
   @IsString()
-  toStatus: string;
+  toStatus!: string;
 
   @IsDate()
   @Type(() => Date)
-  timestamp: Date;
+  timestamp!: Date;
 
   @IsOptional()
   metadata?: Record<string, any>;

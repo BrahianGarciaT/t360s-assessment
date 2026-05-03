@@ -16,26 +16,23 @@ export interface OrderItem {
 @Entity('orders')
 export class Order {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  userId: string;
+  userId!: string;
 
   @Column({ type: 'jsonb' })
-  items: OrderItem[];
+  items!: OrderItem[];
 
   @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.PENDING })
-  status: OrderStatus;
+  status!: OrderStatus;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
-  totalAmount: number;
-
-  @Column({ type: 'integer' })
-  stock: number;
+  totalAmount!: number;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

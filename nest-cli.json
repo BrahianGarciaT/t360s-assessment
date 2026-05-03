@@ -14,7 +14,8 @@
       "entryFile": "main",
       "sourceRoot": "apps/orders/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/orders/tsconfig.app.json"
+        "tsConfigPath": "apps/orders/tsconfig.app.json",
+        "webpack": true
       }
     },
     "audit": {
@@ -23,7 +24,8 @@
       "entryFile": "main",
       "sourceRoot": "apps/audit/src",
       "compilerOptions": {
-        "tsConfigPath": "apps/audit/tsconfig.app.json"
+        "tsConfigPath": "apps/audit/tsconfig.app.json",
+        "webpack": true
       }
     },
     "shared": {
