@@ -124,8 +124,8 @@ Content-Type: application/json
 ### audit — `http://localhost:3001`
 
 #### Historial de cambios de una orden
-```
-GET /audit/:orderId
+```bash
+curl http://localhost:3001/audit/<orderId>
 ```
 
 ---
@@ -163,7 +163,13 @@ El endpoint `GET /orders/search` permite buscar órdenes por texto libre sobre e
 Cada vez que se crea o actualiza una orden, se recalcula automáticamente una columna `tsvector` (`searchVector`) que contiene el texto de `notes` y los `productName` de los items procesado por PostgreSQL:
 
 ```sql
-to_tsvector('english', coalesce(notes, '') || ' ' || coalesce(items::text, ''))
+to_tsvector('english',
+  coalesce(notes, '') || ' ' ||
+  coalesce((
+    SELECT string_agg(item->>'productName', ' ')
+    FROM jsonb_array_elements(items) AS item
+  ), '')
+)
 ```
 
 Al buscar, PostgreSQL convierte el texto de búsqueda en una `tsquery` y la compara contra ese vector usando el operador `@@`. Los resultados se ordenan por relevancia con `ts_rank`.

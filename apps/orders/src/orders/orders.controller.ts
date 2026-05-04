@@ -7,7 +7,6 @@ import {
   Put,
   Query,
   UseGuards,
-  ValidationPipe,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -27,14 +26,12 @@ export class OrdersController {
   }
 
   @Get('search')
-  searchOrders(
-    @Query(new ValidationPipe({ transform: true })) dto: SearchOrdersDto,
-  ) {
+  searchOrders(@Query() dto: SearchOrdersDto) {
     return this.ordersService.searchOrders({ ...dto, q: dto.q.trim() });
   }
 
   @Get()
-  findAll(@Query(new ValidationPipe({ transform: true })) query: QueryOrdersDto) {
+  findAll(@Query() query: QueryOrdersDto) {
     return this.ordersService.findAll(query);
   }
 

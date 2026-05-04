@@ -77,7 +77,10 @@ export class OrdersRepository implements OnModuleInit {
       `UPDATE orders
        SET "searchVector" = to_tsvector('english',
          coalesce(notes, '') || ' ' ||
-         coalesce(items::text, '')
+         coalesce((
+           SELECT string_agg(item->>'productName', ' ')
+           FROM jsonb_array_elements(items) AS item
+         ), '')
        )
        WHERE id = $1`,
       [id],
