@@ -101,7 +101,8 @@ Content-Type: application/json
   "items": [
     { "productId": "prod-1", "productName": "Widget A", "quantity": 2, "price": 15.50 },
     { "productId": "prod-2", "productName": "Widget B", "quantity": 1, "price": 9.00 }
-  ]
+  ],
+  "notes": "Deliver in the morning"
 }
 ```
 
@@ -324,3 +325,39 @@ npm run test        # unit tests
 npm run test:e2e    # e2e tests
 npm run test:cov    # cobertura
 ```
+
+---
+
+## Tests e2e
+
+Los tests e2e corren contra los servicios reales levantados con Docker — no hay mocks. Esto prueba el sistema completo incluyendo los endpoints HTTP, las bases de datos (PostgreSQL y MongoDB) y la comunicación TCP entre los servicios `orders` y `audit`.
+
+### Prerequisito
+
+```bash
+docker-compose up --build -d
+# Esperar que todos los servicios estén healthy antes de continuar
+```
+
+### Comando
+
+```bash
+npm run test:e2e
+```
+
+### Casos cubiertos
+
+| # | Caso |
+|---|------|
+| 1 | `POST /orders` — crea una orden y verifica status `PENDING` y `totalAmount` calculado correctamente |
+| 2 | `GET /orders` — lista paginada y confirma que la orden creada aparece en los resultados |
+| 3 | `GET /orders/search?q=Widget Pro` — búsqueda full-text encuentra la orden por `productName` |
+| 4 | `PUT /orders/:id/status` — transición válida `PENDING → CONFIRMED` |
+| 5 | `PUT /orders/:id/status` — transición inválida `CONFIRMED → PENDING` retorna `400` |
+| 6 | `PUT /orders/:id/status` — transición válida `CONFIRMED → SHIPPED` |
+| 7 | `GET /orders?status=SHIPPED` — filtro por status devuelve la orden correcta |
+| 8 | `GET /audit/:orderId` — los 3 cambios de estado están registrados en orden `ASC` con `fromStatus` y `toStatus` correctos |
+| 9 | `POST /orders` sin header `x-api-key` — retorna `401` |
+| 10 | `POST /orders` con `x-api-key` incorrecto — retorna `401` |
+
+> Los tests corren en serie (`--runInBand`) porque comparten estado: el `orderId` creado en el test 1 se reutiliza en todos los tests siguientes.
