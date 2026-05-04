@@ -13,7 +13,9 @@ export class OrdersRepository {
 
   async create(data: Partial<Order>): Promise<Order> {
     const order = this.repository.create(data);
-    return this.repository.save(order);
+    const saved = await this.repository.save(order);
+    await this.updateSearchVector(saved.id);
+    return saved;
   }
 
   async findAll(query: QueryOrdersDto): Promise<[Order[], number]> {
@@ -39,6 +41,40 @@ export class OrdersRepository {
   }
 
   async save(order: Order): Promise<Order> {
-    return this.repository.save(order);
+    const saved = await this.repository.save(order);
+    await this.updateSearchVector(saved.id);
+    return saved;
+  }
+
+  async searchByText(
+    query: string,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<[Order[], number]> {
+    return this.repository
+      .createQueryBuilder('order')
+      .where(
+        `"order"."searchVector" @@ plainto_tsquery('english', :query)`,
+        { query },
+      )
+      .orderBy(
+        `ts_rank("order"."searchVector", plainto_tsquery('english', :query))`,
+        'DESC',
+      )
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+  }
+
+  private async updateSearchVector(id: string): Promise<void> {
+    await this.repository.query(
+      `UPDATE orders
+       SET "searchVector" = to_tsvector('english',
+         coalesce(notes, '') || ' ' ||
+         coalesce(items::text, '')
+       )
+       WHERE id = $1`,
+      [id],
+    );
   }
 }

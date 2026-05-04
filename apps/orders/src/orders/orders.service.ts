@@ -11,6 +11,7 @@ import { OrdersRepository } from './orders.repository';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
+import { SearchOrdersDto } from './dto/search-orders.dto';
 import { Order } from './entities/order.entity';
 import { AUDIT_TCP_CLIENT } from './orders.constants';
 
@@ -59,6 +60,14 @@ export class OrdersService {
   ): Promise<{ data: Order[]; total: number; page: number; limit: number }> {
     const [data, total] = await this.ordersRepository.findAll(query);
     return { data, total, page: query.page ?? 1, limit: query.limit ?? 10 };
+  }
+
+  async searchOrders(
+    dto: SearchOrdersDto,
+  ): Promise<{ data: Order[]; total: number; page: number; limit: number }> {
+    const { q, page = 1, limit = 10 } = dto;
+    const [data, total] = await this.ordersRepository.searchByText(q, page, limit);
+    return { data, total, page, limit };
   }
 
   async updateStatus(id: string, dto: UpdateStatusDto): Promise<Order> {
