@@ -204,6 +204,47 @@ Errores:
 
 ---
 
+## Autenticación
+
+Todos los endpoints del servicio **orders** requieren el header `x-api-key`. Sin él, o con un valor incorrecto, la petición es rechazada antes de llegar al controlador.
+
+### Cómo incluir el header
+
+```bash
+# Listar órdenes
+curl -H "x-api-key: tu-api-key" http://localhost:3000/orders
+
+# Crear una orden
+curl -X POST http://localhost:3000/orders \
+  -H "x-api-key: tu-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"user-1","items":[{"productId":"p1","productName":"Widget","quantity":2,"price":10}]}'
+
+# Cambiar estado
+curl -X PUT http://localhost:3000/orders/<id>/status \
+  -H "x-api-key: tu-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"CONFIRMED"}'
+```
+
+### Respuestas de error
+
+| Situación | HTTP | Mensaje |
+|-----------|------|---------|
+| Header `x-api-key` ausente | `401 Unauthorized` | `Missing x-api-key header` |
+| Header `x-api-key` con valor incorrecto | `401 Unauthorized` | `Invalid API key` |
+
+### Configuración
+
+La clave se define en la variable de entorno `API_KEY` del servicio orders:
+
+```bash
+# .env
+API_KEY=your-secret-api-key-here
+```
+
+---
+
 ## Rate Limiting
 
 El servicio **orders** aplica rate limiting global en todos sus endpoints mediante `@nestjs/throttler`.
@@ -244,6 +285,7 @@ THROTTLE_LIMIT=50
 | `AUDIT_TCP_HOST` | Host del servicio audit (para TCP) | `audit` |
 | `THROTTLE_TTL` | Ventana de rate limiting en ms (orders) | `60000` |
 | `THROTTLE_LIMIT` | Requests máximos por ventana (orders) | `100` |
+| `API_KEY` | Clave requerida en el header `x-api-key` (orders) | — |
 
 ---
 

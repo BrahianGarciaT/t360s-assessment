@@ -7,6 +7,7 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
@@ -14,7 +15,9 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { SearchOrdersDto } from './dto/search-orders.dto';
+import { ApiKeyGuard } from '../guards/api-key.guard';
 
+@UseGuards(ApiKeyGuard)
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}

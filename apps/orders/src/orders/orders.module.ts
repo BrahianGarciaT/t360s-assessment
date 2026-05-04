@@ -7,6 +7,7 @@ import { OrdersRepository } from './orders.repository';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { AUDIT_TCP_CLIENT } from './orders.constants';
+import { ApiKeyGuard } from '../guards/api-key.guard';
 
 @Module({
   imports: [
@@ -27,6 +28,6 @@ import { AUDIT_TCP_CLIENT } from './orders.constants';
     ]),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, OrdersRepository],
+  providers: [OrdersService, OrdersRepository, ApiKeyGuard],
 })
 export class OrdersModule {}
