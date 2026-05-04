@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
@@ -31,11 +30,6 @@ export class OrdersController {
   searchOrders(
     @Query(new ValidationPipe({ transform: true })) dto: SearchOrdersDto,
   ) {
-    if (dto.q.trim().length < 2) {
-      throw new BadRequestException(
-        'Search query must be at least 2 characters',
-      );
-    }
     return this.ordersService.searchOrders({ ...dto, q: dto.q.trim() });
   }
 

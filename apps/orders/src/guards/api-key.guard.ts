@@ -8,7 +8,8 @@ export class ApiKeyGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
-    const apiKey = request.headers['x-api-key'];
+    const raw = request.headers['x-api-key'];
+    const apiKey = Array.isArray(raw) ? raw[0] : raw;
     const expectedKey = this.configService.get<string>('API_KEY');
 
     if (!apiKey) {

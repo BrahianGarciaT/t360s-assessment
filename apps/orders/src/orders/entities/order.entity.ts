@@ -35,7 +35,7 @@ export class Order {
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 
-  @Index('IDX_ORDERS_SEARCH_VECTOR')
+  @Index('IDX_ORDERS_SEARCH_VECTOR', { synchronize: false })
   @Column({
     type: 'tsvector',
     nullable: true,

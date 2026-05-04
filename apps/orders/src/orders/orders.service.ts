@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { catchError, EMPTY } from 'rxjs';
 import { ORDER_EVENTS, OrderStatus, OrderStatusChangedEvent } from '@app/shared';
 import { OrdersRepository } from './orders.repository';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -41,6 +42,7 @@ export class OrdersService {
     const order = await this.ordersRepository.create({
       userId: dto.userId,
       items: dto.items,
+      notes: dto.notes ?? null,
       totalAmount,
       status: OrderStatus.PENDING,
     });
@@ -99,13 +101,17 @@ export class OrdersService {
   }
 
   private emitStatusChanged(event: OrderStatusChangedEvent): void {
-    try {
-      this.auditClient.emit(ORDER_EVENTS.STATUS_CHANGED, event);
-    } catch (error) {
-      this.logger.error(
-        `Failed to emit ${ORDER_EVENTS.STATUS_CHANGED} for order ${event.orderId}`,
-        error,
-      );
-    }
+    this.auditClient
+      .emit(ORDER_EVENTS.STATUS_CHANGED, event)
+      .pipe(
+        catchError((error) => {
+          this.logger.error(
+            `Failed to emit ${ORDER_EVENTS.STATUS_CHANGED} for order ${event.orderId}`,
+            error,
+          );
+          return EMPTY;
+        }),
+      )
+      .subscribe();
   }
 }

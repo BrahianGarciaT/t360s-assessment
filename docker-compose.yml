@@ -42,6 +42,9 @@ services:
       ORDERS_DB_NAME: ${ORDERS_DB_NAME}
       AUDIT_TCP_HOST: ${AUDIT_TCP_HOST}
       AUDIT_TCP_PORT: ${AUDIT_TCP_PORT}
+      API_KEY: ${API_KEY}
+      THROTTLE_TTL: ${THROTTLE_TTL}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT}
     ports:
       - '3000:3000'
     networks:

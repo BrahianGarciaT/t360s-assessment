@@ -12,6 +12,7 @@ import {
 
 export class OrderItemDto {
   @IsString()
+  @IsNotEmpty()
   productId!: string;
 
   @IsString()
@@ -29,6 +30,7 @@ export class OrderItemDto {
 
 export class CreateOrderDto {
   @IsString()
+  @IsNotEmpty()
   userId!: string;
 
   @IsArray()

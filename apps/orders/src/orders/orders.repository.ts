@@ -1,15 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 
 @Injectable()
-export class OrdersRepository {
+export class OrdersRepository implements OnModuleInit {
   constructor(
     @InjectRepository(Order)
     private readonly repository: Repository<Order>,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.repository.query(
+      `CREATE INDEX IF NOT EXISTS "IDX_ORDERS_SEARCH_VECTOR" ON orders USING gin("searchVector")`,
+    );
+  }
 
   async create(data: Partial<Order>): Promise<Order> {
     const order = this.repository.create(data);

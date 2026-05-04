@@ -99,8 +99,8 @@ Content-Type: application/json
 {
   "userId": "user-123",
   "items": [
-    { "productId": "prod-1", "quantity": 2, "price": 15.50 },
-    { "productId": "prod-2", "quantity": 1, "price": 9.00 }
+    { "productId": "prod-1", "productName": "Widget A", "quantity": 2, "price": 15.50 },
+    { "productId": "prod-2", "productName": "Widget B", "quantity": 1, "price": 9.00 }
   ]
 }
 ```
