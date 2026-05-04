@@ -154,6 +154,56 @@ Cualquier transición fuera de este mapa retorna `400 Bad Request`.
 
 ---
 
+## Full-Text Search
+
+El endpoint `GET /orders/search` permite buscar órdenes por texto libre sobre el campo `notes` y el `productName` de cada item.
+
+### Cómo funciona
+
+Cada vez que se crea o actualiza una orden, se recalcula automáticamente una columna `tsvector` (`searchVector`) que contiene el texto de `notes` y los `productName` de los items procesado por PostgreSQL:
+
+```sql
+to_tsvector('english', coalesce(notes, '') || ' ' || coalesce(items::text, ''))
+```
+
+Al buscar, PostgreSQL convierte el texto de búsqueda en una `tsquery` y la compara contra ese vector usando el operador `@@`. Los resultados se ordenan por relevancia con `ts_rank`.
+
+El campo `searchVector` tiene un índice GIN que hace esta comparación eficiente incluso con grandes volúmenes de datos.
+
+### Supuesto de diseño
+
+Se usa el idioma `'english'` tanto al indexar (`to_tsvector`) como al buscar (`plainto_tsquery`). Ambos deben coincidir para que el stemming funcione correctamente — si se indexa con un idioma y se busca con otro, no hay resultados. En un sistema multilenguaje este valor debería ser configurable.
+
+### `plainto_tsquery` vs `to_tsquery`
+
+Se usa `plainto_tsquery` en lugar de `to_tsquery` porque acepta texto libre sin sintaxis especial. El usuario puede escribir `"blue widget"` y PostgreSQL lo interpreta internamente como `blue & widget`, sin que el usuario tenga que conocer los operadores de tsquery.
+
+### Uso
+
+```bash
+# Búsqueda básica
+curl "http://localhost:3000/orders/search?q=widget"
+
+# Con paginación
+curl "http://localhost:3000/orders/search?q=blue+widget&page=1&limit=5"
+```
+
+Respuesta:
+```json
+{
+  "data": [...],
+  "total": 12,
+  "page": 1,
+  "limit": 5
+}
+```
+
+Errores:
+- `400 Bad Request` — si `q` está vacío o tiene menos de 2 caracteres
+- `429 Too Many Requests` — si se supera el rate limit global
+
+---
+
 ## Rate Limiting
 
 El servicio **orders** aplica rate limiting global en todos sus endpoints mediante `@nestjs/throttler`.
