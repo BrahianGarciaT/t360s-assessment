@@ -110,6 +110,28 @@ describe('OutboxPollerService', () => {
     expect(outboxRepository.markSent).not.toHaveBeenCalled();
   });
 
+  it('does not let a throwing auditClient.close() escape tick() as an unhandled rejection', async () => {
+    const row = buildRow();
+    outboxRepository.claimDue.mockResolvedValue([row]);
+    auditClient.send.mockReturnValue(throwError(() => new Error('audit down')));
+    auditClient.close.mockImplementation(() => {
+      throw new Error('close() blew up');
+    });
+
+    // If tick() lets this escape, this await itself would reject — that's
+    // the failure mode this test guards against (an unhandled rejection
+    // from a scheduled tick would otherwise crash the whole process).
+    await expect(poller.tick()).resolves.toBeUndefined();
+
+    expect(auditClient.close).toHaveBeenCalledTimes(1);
+    expect(outboxRepository.markError).toHaveBeenCalledWith(
+      row.id,
+      1,
+      expect.any(Number),
+      expect.any(Error),
+    );
+  });
+
   it('passes the configured max attempts through to markError so the repository can cap to failed (triangulation)', async () => {
     const row = buildRow({ attempts: 9 });
     outboxRepository.claimDue.mockResolvedValue([row]);
