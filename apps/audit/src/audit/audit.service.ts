@@ -17,9 +17,6 @@ export class AuditService {
   }
 
   async findByOrderId(orderId: string): Promise<AuditLog[]> {
-    return this.auditLogModel
-      .find({ orderId })
-      .sort({ timestamp: 1 })
-      .exec();
+    return this.auditLogModel.find({ orderId }).sort({ timestamp: 1 }).exec();
   }
 }

@@ -59,10 +59,9 @@ export class OrdersRepository implements OnModuleInit {
   ): Promise<[Order[], number]> {
     return this.repository
       .createQueryBuilder('order')
-      .where(
-        `"order"."searchVector" @@ plainto_tsquery('english', :query)`,
-        { query },
-      )
+      .where(`"order"."searchVector" @@ plainto_tsquery('english', :query)`, {
+        query,
+      })
       .orderBy(
         `ts_rank("order"."searchVector", plainto_tsquery('english', :query))`,
         'DESC',

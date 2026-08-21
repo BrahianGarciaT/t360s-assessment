@@ -47,7 +47,9 @@ describe('Order flow (e2e)', () => {
 
     expect(res.status).toBe(200);
     expect(Array.isArray(res.data.data)).toBe(true);
-    expect(res.data.data.some((o: { id: string }) => o.id === orderId)).toBe(true);
+    expect(res.data.data.some((o: { id: string }) => o.id === orderId)).toBe(
+      true,
+    );
   });
 
   it('GET /orders/search?q=Widget Pro — finds order by full-text search', async () => {
@@ -57,7 +59,9 @@ describe('Order flow (e2e)', () => {
 
     expect(res.status).toBe(200);
     expect(Array.isArray(res.data.data)).toBe(true);
-    expect(res.data.data.some((o: { id: string }) => o.id === orderId)).toBe(true);
+    expect(res.data.data.some((o: { id: string }) => o.id === orderId)).toBe(
+      true,
+    );
   });
 
   it('PUT /orders/:id/status — valid transition PENDING → CONFIRMED', async () => {
@@ -87,11 +91,15 @@ describe('Order flow (e2e)', () => {
   });
 
   it('GET /orders — filters by status SHIPPED', async () => {
-    const res = await ordersApi.get('/orders', { params: { status: 'SHIPPED' } });
+    const res = await ordersApi.get('/orders', {
+      params: { status: 'SHIPPED' },
+    });
 
     expect(res.status).toBe(200);
     expect(Array.isArray(res.data.data)).toBe(true);
-    expect(res.data.data.some((o: { id: string }) => o.id === orderId)).toBe(true);
+    expect(res.data.data.some((o: { id: string }) => o.id === orderId)).toBe(
+      true,
+    );
   });
 
   it('GET /audit/:orderId — recorded all status changes', async () => {
@@ -111,8 +119,8 @@ describe('Order flow (e2e)', () => {
     expect(res.data[2].fromStatus).toBe('CONFIRMED');
     expect(res.data[2].toStatus).toBe('SHIPPED');
 
-    const timestamps: number[] = res.data.map(
-      (log: { timestamp: string }) => new Date(log.timestamp).getTime(),
+    const timestamps: number[] = res.data.map((log: { timestamp: string }) =>
+      new Date(log.timestamp).getTime(),
     );
     expect(timestamps[0]).toBeLessThanOrEqual(timestamps[1]);
     expect(timestamps[1]).toBeLessThanOrEqual(timestamps[2]);

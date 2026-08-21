@@ -1,5 +1,10 @@
 import { timingSafeEqual } from 'crypto';
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 
