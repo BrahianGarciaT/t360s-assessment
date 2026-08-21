@@ -1,4 +1,5 @@
 import { of, throwError } from 'rxjs';
+import { INVENTORY_EVENTS, INVENTORY_PATTERNS } from '@app/shared';
 import { OutboxPollerService } from './outbox-poller.service';
 import { OutboxRepository } from './outbox.repository';
 import { OutboxEvent } from './entities/outbox-event.entity';
@@ -13,6 +14,7 @@ describe('OutboxPollerService', () => {
     >
   >;
   let auditClient: { send: jest.Mock; close: jest.Mock };
+  let inventoryClient: { send: jest.Mock; close: jest.Mock };
   let logger: { error: jest.Mock; warn: jest.Mock; info: jest.Mock };
 
   const buildRow = (overrides: Partial<OutboxEvent> = {}): OutboxEvent =>
@@ -43,6 +45,10 @@ describe('OutboxPollerService', () => {
       send: jest.fn(),
       close: jest.fn(),
     };
+    inventoryClient = {
+      send: jest.fn(),
+      close: jest.fn(),
+    };
     logger = {
       error: jest.fn(),
       warn: jest.fn(),
@@ -52,6 +58,7 @@ describe('OutboxPollerService', () => {
     poller = new OutboxPollerService(
       outboxRepository as unknown as OutboxRepository,
       auditClient as never,
+      inventoryClient as never,
       logger as never,
     );
   });
@@ -66,11 +73,12 @@ describe('OutboxPollerService', () => {
     await poller.tick();
 
     expect(auditClient.send).not.toHaveBeenCalled();
+    expect(inventoryClient.send).not.toHaveBeenCalled();
     expect(outboxRepository.markAttempt).not.toHaveBeenCalled();
   });
 
-  it('marks an attempt before sending, delivers the event, and marks it sent on success', async () => {
-    const row = buildRow();
+  it('routes an order.* event to the audit client using the eventType as the pattern', async () => {
+    const row = buildRow({ eventType: 'order.status_changed' });
     outboxRepository.claimDue.mockResolvedValue([row]);
     auditClient.send.mockReturnValue(of({ ok: true, eventId: row.id }));
 
@@ -94,30 +102,130 @@ describe('OutboxPollerService', () => {
     expect(outboxRepository.markSent).toHaveBeenCalledWith(row.id);
     expect(outboxRepository.markError).not.toHaveBeenCalled();
     expect(auditClient.close).not.toHaveBeenCalled();
+    expect(inventoryClient.send).not.toHaveBeenCalled();
   });
 
-  it('marks the event errored, closes the client and stops processing further rows on the first failure (break)', async () => {
-    const rowA = buildRow({ id: 'evt-a' });
-    const rowB = buildRow({ id: 'evt-b' });
-    outboxRepository.claimDue.mockResolvedValue([rowA, rowB]);
-    auditClient.send.mockReturnValue(throwError(() => new Error('audit down')));
+  it('routes an inventory.commit_requested event to the inventory client, translated to the inventory.commit TCP pattern', async () => {
+    const row = buildRow({
+      id: 'evt-commit',
+      eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,
+      payload: { orderId: 'order-1' },
+    });
+    outboxRepository.claimDue.mockResolvedValue([row]);
+    inventoryClient.send.mockReturnValue(of({ ok: true, orderId: 'order-1' }));
 
     await poller.tick();
 
+    expect(inventoryClient.send).toHaveBeenCalledWith(
+      INVENTORY_PATTERNS.COMMIT,
+      { eventId: row.id, ...row.payload },
+    );
+    expect(outboxRepository.markSent).toHaveBeenCalledWith(row.id);
+    expect(auditClient.send).not.toHaveBeenCalled();
+  });
+
+  it('routes an inventory.release_requested event to the inventory client, translated to the inventory.release TCP pattern (triangulation)', async () => {
+    const row = buildRow({
+      id: 'evt-release',
+      eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
+      payload: { orderId: 'order-2' },
+    });
+    outboxRepository.claimDue.mockResolvedValue([row]);
+    inventoryClient.send.mockReturnValue(of({ ok: true, orderId: 'order-2' }));
+
+    await poller.tick();
+
+    expect(inventoryClient.send).toHaveBeenCalledWith(
+      INVENTORY_PATTERNS.RELEASE,
+      { eventId: row.id, ...row.payload },
+    );
+    expect(outboxRepository.markSent).toHaveBeenCalledWith(row.id);
+  });
+
+  it('marks an unroutable eventType as errored without attempting delivery on any client', async () => {
+    const row = buildRow({ eventType: 'unknown.mystery_event' });
+    outboxRepository.claimDue.mockResolvedValue([row]);
+
+    await poller.tick();
+
+    expect(auditClient.send).not.toHaveBeenCalled();
+    expect(inventoryClient.send).not.toHaveBeenCalled();
     expect(outboxRepository.markError).toHaveBeenCalledWith(
-      rowA.id,
-      1, // attempts after markAttempt bumped it
+      row.id,
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Error),
+    );
+  });
+
+  it('isolates a failed destination: an audit failure closes only auditClient and still delivers a same-tick inventory row', async () => {
+    const auditRowA = buildRow({ id: 'evt-a', eventType: 'order.status_changed' });
+    const auditRowB = buildRow({ id: 'evt-b', eventType: 'order.status_changed' });
+    const inventoryRow = buildRow({
+      id: 'evt-c',
+      eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,
+      payload: { orderId: 'order-3' },
+    });
+    outboxRepository.claimDue.mockResolvedValue([
+      auditRowA,
+      auditRowB,
+      inventoryRow,
+    ]);
+    auditClient.send.mockReturnValue(throwError(() => new Error('audit down')));
+    inventoryClient.send.mockReturnValue(of({ ok: true, orderId: 'order-3' }));
+
+    await poller.tick();
+
+    // first audit row: attempted and errored
+    expect(outboxRepository.markError).toHaveBeenCalledWith(
+      auditRowA.id,
+      1,
       expect.any(Number),
       expect.any(Error),
     );
     expect(auditClient.close).toHaveBeenCalledTimes(1);
-    // break: the second row must never be attempted
-    expect(auditClient.send).toHaveBeenCalledTimes(1);
-    expect(outboxRepository.markAttempt).toHaveBeenCalledTimes(1);
-    expect(outboxRepository.markSent).not.toHaveBeenCalled();
+    expect(auditClient.send).toHaveBeenCalledTimes(1); // second audit row skipped (continue, not break)
+
+    // inventory row in the SAME tick was still delivered — the audit failure
+    // never stalls a different destination
+    expect(inventoryClient.send).toHaveBeenCalledTimes(1);
+    expect(outboxRepository.markSent).toHaveBeenCalledWith(inventoryRow.id);
+    expect(inventoryClient.close).not.toHaveBeenCalled();
   });
 
-  it('does not let a throwing auditClient.close() escape tick() as an unhandled rejection', async () => {
+  it('isolates a failed destination: an inventory failure closes only inventoryClient and still delivers a same-tick audit row (triangulation)', async () => {
+    const inventoryRowA = buildRow({
+      id: 'evt-inv-a',
+      eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
+      payload: { orderId: 'order-4' },
+    });
+    const inventoryRowB = buildRow({
+      id: 'evt-inv-b',
+      eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
+      payload: { orderId: 'order-5' },
+    });
+    const auditRow = buildRow({ id: 'evt-audit', eventType: 'order.status_changed' });
+    outboxRepository.claimDue.mockResolvedValue([
+      inventoryRowA,
+      inventoryRowB,
+      auditRow,
+    ]);
+    inventoryClient.send.mockReturnValue(
+      throwError(() => new Error('inventory down')),
+    );
+    auditClient.send.mockReturnValue(of({ ok: true, eventId: auditRow.id }));
+
+    await poller.tick();
+
+    expect(inventoryClient.close).toHaveBeenCalledTimes(1);
+    expect(inventoryClient.send).toHaveBeenCalledTimes(1); // second inventory row skipped
+
+    expect(auditClient.send).toHaveBeenCalledTimes(1);
+    expect(outboxRepository.markSent).toHaveBeenCalledWith(auditRow.id);
+    expect(auditClient.close).not.toHaveBeenCalled();
+  });
+
+  it('does not let a throwing client.close() escape tick() as an unhandled rejection', async () => {
     const row = buildRow();
     outboxRepository.claimDue.mockResolvedValue([row]);
     auditClient.send.mockReturnValue(throwError(() => new Error('audit down')));
