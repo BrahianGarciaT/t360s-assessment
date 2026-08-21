@@ -194,4 +194,30 @@ describe('InventoryService', () => {
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
   });
+
+  describe('setStock / getStockLevel', () => {
+    it('delegates the seed upsert to the repository and returns its result', async () => {
+      const stock = { productId: 'p1', quantity: 10, reserved: 0 };
+      (repository as unknown as { upsertStock: jest.Mock }).upsertStock = jest
+        .fn()
+        .mockResolvedValue(stock);
+
+      const result = await service.setStock('p1', 10);
+
+      expect(
+        (repository as unknown as { upsertStock: jest.Mock }).upsertStock,
+      ).toHaveBeenCalledWith('p1', 10);
+      expect(result).toBe(stock);
+    });
+
+    it('delegates the read to the repository and returns null for an unknown productId (triangulation)', async () => {
+      (repository as unknown as { getStock: jest.Mock }).getStock = jest
+        .fn()
+        .mockResolvedValue(null);
+
+      const result = await service.getStockLevel('ghost');
+
+      expect(result).toBeNull();
+    });
+  });
 });

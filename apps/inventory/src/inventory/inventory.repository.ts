@@ -33,6 +33,8 @@ export class InventoryRepository {
   constructor(
     @InjectRepository(Reservation)
     private readonly repository: Repository<Reservation>,
+    @InjectRepository(StockItem)
+    private readonly stockItemRepository: Repository<StockItem>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -161,6 +163,29 @@ export class InventoryRepository {
       order: { expiresAt: 'ASC' },
       take: batchSize,
     });
+  }
+
+  /** Idempotent upsert backing `PUT /stock/:productId` — a fixture/demo seam, not a restock API. */
+  async upsertStock(productId: string, quantity: number): Promise<StockItem> {
+    const existing = await this.stockItemRepository.findOne({
+      where: { productId },
+    });
+
+    if (!existing) {
+      const created = this.stockItemRepository.create({
+        productId,
+        quantity,
+        reserved: 0,
+      });
+      return this.stockItemRepository.save(created);
+    }
+
+    existing.quantity = quantity;
+    return this.stockItemRepository.save(existing);
+  }
+
+  async getStock(productId: string): Promise<StockItem | null> {
+    return this.stockItemRepository.findOne({ where: { productId } });
   }
 
   private sumAndSortItems(items: ReserveStockItem[]): ReservationItem[] {

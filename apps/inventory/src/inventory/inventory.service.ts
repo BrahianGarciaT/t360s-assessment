@@ -7,6 +7,7 @@ import {
 } from './inventory.repository';
 import { getInventoryConfig, InventoryConfig } from './inventory.constants';
 import { ReleasedReason } from './entities/reservation.entity';
+import { StockItem } from './entities/stock-item.entity';
 
 // Postgres unique-violation SQLSTATE (raised on the reservations.orderId PK).
 const POSTGRES_UNIQUE_VIOLATION_ERROR_CODE = '23505';
@@ -100,6 +101,15 @@ export class InventoryService {
       );
     }
     return { ok: true, orderId };
+  }
+
+  /** Idempotent fixture/demo seam backing `PUT /stock/:productId` — not a restock API. */
+  async setStock(productId: string, quantity: number): Promise<StockItem> {
+    return this.repository.upsertStock(productId, quantity);
+  }
+
+  async getStockLevel(productId: string): Promise<StockItem | null> {
+    return this.repository.getStock(productId);
   }
 
   private isDuplicateKeyError(error: unknown): boolean {

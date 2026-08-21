@@ -1,4 +1,10 @@
-import { Check, Column, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Check,
+  Column,
+  Entity,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 /**
  * `quantity` is total on-hand stock; `reserved` is stock held by `held`
@@ -6,7 +12,10 @@ import { Check, Column, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm'
  * never stored, so it can never drift out of sync.
  */
 @Entity('stock_items')
-@Check('CHK_STOCK_RESERVED_BOUNDS', '"reserved" >= 0 AND "reserved" <= "quantity"')
+@Check(
+  'CHK_STOCK_RESERVED_BOUNDS',
+  '"reserved" >= 0 AND "reserved" <= "quantity"',
+)
 export class StockItem {
   @PrimaryColumn({ type: 'varchar', length: 255 })
   productId!: string;

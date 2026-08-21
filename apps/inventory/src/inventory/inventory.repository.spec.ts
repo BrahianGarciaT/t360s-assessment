@@ -20,6 +20,11 @@ describe('InventoryRepository', () => {
   };
   let stockManagerRepo: { findOne: jest.Mock };
   let baseRepository: { find: jest.Mock };
+  let stockItemRepository: {
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
 
   const buildReservation = (
     overrides: Partial<Reservation> = {},
@@ -55,9 +60,15 @@ describe('InventoryRepository', () => {
       ),
     };
     baseRepository = { find: jest.fn() };
+    stockItemRepository = {
+      findOne: jest.fn(),
+      create: jest.fn((v) => v),
+      save: jest.fn(),
+    };
 
     repository = new InventoryRepository(
       baseRepository as never,
+      stockItemRepository as never,
       dataSource as unknown as DataSource,
     );
   });
@@ -236,6 +247,60 @@ describe('InventoryRepository', () => {
       expect(whereArg.expiresAt.type).toBe('lessThan');
       expect(whereArg.expiresAt.value).toBeInstanceOf(Date);
       expect(result).toBe(due);
+    });
+  });
+
+  describe('upsertStock', () => {
+    it('creates a new stock_items row with reserved:0 when the productId does not exist', async () => {
+      stockItemRepository.findOne.mockResolvedValue(null);
+      stockItemRepository.save.mockImplementation((v) => v);
+
+      const result = await repository.upsertStock('p1', 10);
+
+      expect(stockItemRepository.create).toHaveBeenCalledWith({
+        productId: 'p1',
+        quantity: 10,
+        reserved: 0,
+      });
+      expect(result).toEqual({ productId: 'p1', quantity: 10, reserved: 0 });
+    });
+
+    it('overwrites quantity in place (idempotent upsert) when the productId already exists (triangulation)', async () => {
+      const existing = { productId: 'p1', quantity: 5, reserved: 2 };
+      stockItemRepository.findOne.mockResolvedValue(existing);
+      stockItemRepository.save.mockImplementation((v) => v);
+
+      const result = await repository.upsertStock('p1', 20);
+
+      expect(stockItemRepository.create).not.toHaveBeenCalled();
+      expect(stockItemRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: 'p1', quantity: 20, reserved: 2 }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({ productId: 'p1', quantity: 20 }),
+      );
+    });
+  });
+
+  describe('getStock', () => {
+    it('returns the stock_items row for a known productId', async () => {
+      const stock = { productId: 'p1', quantity: 10, reserved: 2 };
+      stockItemRepository.findOne.mockResolvedValue(stock);
+
+      const result = await repository.getStock('p1');
+
+      expect(stockItemRepository.findOne).toHaveBeenCalledWith({
+        where: { productId: 'p1' },
+      });
+      expect(result).toBe(stock);
+    });
+
+    it('returns null for an unknown productId (triangulation)', async () => {
+      stockItemRepository.findOne.mockResolvedValue(null);
+
+      const result = await repository.getStock('ghost');
+
+      expect(result).toBeNull();
     });
   });
 });
