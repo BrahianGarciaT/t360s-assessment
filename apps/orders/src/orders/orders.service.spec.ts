@@ -1,10 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { of } from 'rxjs';
-import { OrderStatus } from '@app/shared';
+import { ORDER_EVENTS, OrderStatus } from '@app/shared';
 import { OrdersService } from './orders.service';
-import { OrdersRepository } from './orders.repository';
-import { AUDIT_TCP_CLIENT } from './orders.constants';
+import { OrdersRepository, OutboxEventFactory } from './orders.repository';
 import { Order } from './entities/order.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 
@@ -16,7 +14,6 @@ describe('OrdersService', () => {
       'create' | 'findAll' | 'searchByText' | 'findById' | 'save'
     >
   >;
-  let auditClient: { emit: jest.Mock };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
@@ -43,15 +40,10 @@ describe('OrdersService', () => {
       save: jest.fn(),
     };
 
-    auditClient = {
-      emit: jest.fn().mockReturnValue(of(undefined)),
-    };
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
         { provide: OrdersRepository, useValue: repository },
-        { provide: AUDIT_TCP_CLIENT, useValue: auditClient },
       ],
     }).compile();
 
@@ -63,7 +55,7 @@ describe('OrdersService', () => {
   });
 
   describe('createOrder', () => {
-    it('calculates totalAmount from items, sets PENDING status and emits audit event with fromStatus null', async () => {
+    it('calculates totalAmount from items, sets PENDING status and hands the repository an event factory', async () => {
       const dto: CreateOrderDto = {
         userId: 'user-1',
         items: [
@@ -84,15 +76,22 @@ describe('OrdersService', () => {
           totalAmount: 35,
           status: OrderStatus.PENDING,
         }),
+        expect.any(Function),
       );
-      expect(auditClient.emit).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
+
+      const [, eventFactory] = repository.create.mock.calls[0] as [
+        unknown,
+        OutboxEventFactory,
+      ];
+      const event = eventFactory(created);
+      expect(event).toEqual({
+        eventType: ORDER_EVENTS.STATUS_CHANGED,
+        payload: expect.objectContaining({
           orderId: created.id,
           fromStatus: null,
           toStatus: OrderStatus.PENDING,
         }),
-      );
+      });
       expect(result).toBe(created);
     });
   });
@@ -118,7 +117,7 @@ describe('OrdersService', () => {
   });
 
   describe('updateStatus', () => {
-    it('updates status and emits event with fromStatus/toStatus on a valid transition', async () => {
+    it('updates status and hands the repository an event factory with fromStatus/toStatus on a valid transition', async () => {
       const order = buildOrder({ status: OrderStatus.PENDING });
       repository.findById.mockResolvedValue(order);
       repository.save.mockImplementation(async (o: Order) => o);
@@ -130,15 +129,22 @@ describe('OrdersService', () => {
       expect(result.status).toBe(OrderStatus.CONFIRMED);
       expect(repository.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: OrderStatus.CONFIRMED }),
+        expect.any(Function),
       );
-      expect(auditClient.emit).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
+
+      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
+        Order,
+        OutboxEventFactory,
+      ];
+      const event = eventFactory(savedOrder);
+      expect(event).toEqual({
+        eventType: ORDER_EVENTS.STATUS_CHANGED,
+        payload: expect.objectContaining({
           orderId: order.id,
           fromStatus: OrderStatus.PENDING,
           toStatus: OrderStatus.CONFIRMED,
         }),
-      );
+      });
     });
 
     it('throws BadRequestException on an invalid transition (DELIVERED -> PENDING)', async () => {
@@ -149,7 +155,6 @@ describe('OrdersService', () => {
         service.updateStatus(order.id, { status: OrderStatus.PENDING }),
       ).rejects.toThrow(BadRequestException);
       expect(repository.save).not.toHaveBeenCalled();
-      expect(auditClient.emit).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when the order does not exist', async () => {
