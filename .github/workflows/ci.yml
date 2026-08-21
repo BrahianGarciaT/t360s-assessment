@@ -58,7 +58,7 @@ jobs:
         run: cp .env.example .env
 
       - name: Build and start services
-        run: docker-compose up --build -d
+        run: docker compose up --build -d
 
       - name: Wait for services to be healthy
         run: |
@@ -67,13 +67,13 @@ jobs:
           elapsed=0
           interval=5
 
-          services=$(docker-compose config --services)
+          services=$(docker compose config --services)
 
           while true; do
             all_ready=true
 
             for service in $services; do
-              container_id=$(docker-compose ps -q "$service")
+              container_id=$(docker compose ps -q "$service")
 
               if [ -z "$container_id" ]; then
                 all_ready=false
@@ -102,8 +102,8 @@ jobs:
 
             if [ "$elapsed" -ge "$timeout" ]; then
               echo "Timed out waiting for services to become healthy."
-              docker-compose ps
-              docker-compose logs
+              docker compose ps
+              docker compose logs
               exit 1
             fi
 
@@ -117,8 +117,8 @@ jobs:
 
       - name: Show logs on failure
         if: failure()
-        run: docker-compose logs
+        run: docker compose logs
 
       - name: Tear down services
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
