@@ -6,6 +6,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { Order } from './orders/entities/order.entity';
 import { OutboxEvent } from './orders/entities/outbox-event.entity';
 import { OrdersModule } from './orders/orders.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { OrdersModule } from './orders/orders.module';
       inject: [ConfigService],
     }),
     OrdersModule,
+    HealthModule,
   ],
   providers: [
     {

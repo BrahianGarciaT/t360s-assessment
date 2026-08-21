@@ -139,12 +139,24 @@ Content-Type: application/json
 { "status": "CONFIRMED" }
 ```
 
+#### Healthcheck
+```
+GET /health
+```
+Chequea la conexión a PostgreSQL (`TypeOrmHealthIndicator`) y reporta la causa cuando el servicio no está saludable. Público, sin `x-api-key`.
+
 ### audit — `http://localhost:3001`
 
 #### Historial de cambios de una orden
 ```bash
 curl http://localhost:3001/audit/<orderId>
 ```
+
+#### Healthcheck
+```
+GET /health
+```
+Chequea la conexión a MongoDB (`MongooseHealthIndicator`) y reporta la causa cuando el servicio no está saludable.
 
 ---
 

@@ -64,10 +64,7 @@ services:
         - 'node'
         - '-e'
         - |
-          const net = require('net');
-          const c = net.createConnection({ port: 3000, host: 'localhost' });
-          c.on('connect', () => { c.destroy(); process.exit(0); });
-          c.on('error', () => process.exit(1));
+          require('http').get('http://localhost:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));
       interval: 15s
       timeout: 10s
       retries: 5
@@ -95,14 +92,7 @@ services:
         - 'node'
         - '-e'
         - |
-          const net = require('net');
-          let done = 0;
-          const check = (port) => new Promise(res => {
-            const c = net.createConnection({ port, host: 'localhost' });
-            c.on('connect', () => { c.destroy(); done++; res(); });
-            c.on('error', res);
-          });
-          Promise.all([check(3001), check(4001)]).then(() => process.exit(done === 2 ? 0 : 1));
+          require('http').get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));
       interval: 15s
       timeout: 10s
       retries: 5
