@@ -1,10 +1,30 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { ORDER_EVENTS, OrderStatus } from '@app/shared';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { of, throwError, TimeoutError } from 'rxjs';
+import {
+  INVENTORY_EVENTS,
+  INVENTORY_PATTERNS,
+  ORDER_EVENTS,
+  OrderStatus,
+} from '@app/shared';
 import { OrdersService } from './orders.service';
 import { OrdersRepository, OutboxEventFactory } from './orders.repository';
+import { INVENTORY_TCP_CLIENT } from './orders.constants';
 import { Order } from './entities/order.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
+
+jest.mock('crypto', () => ({
+  randomUUID: jest.fn(),
+}));
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { randomUUID } from 'crypto';
+
+const GENERATED_ID = 'order-uuid-1';
 
 describe('OrdersService', () => {
   let service: OrdersService;
@@ -14,10 +34,11 @@ describe('OrdersService', () => {
       'create' | 'findAll' | 'searchByText' | 'findById' | 'save'
     >
   >;
+  let inventoryClient: { send: jest.Mock };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
-      id: 'order-1',
+      id: GENERATED_ID,
       userId: 'user-1',
       items: [
         { productId: 'p1', productName: 'Product 1', quantity: 2, price: 10 },
@@ -39,11 +60,14 @@ describe('OrdersService', () => {
       findById: jest.fn(),
       save: jest.fn(),
     };
+    inventoryClient = { send: jest.fn() };
+    (randomUUID as jest.Mock).mockReturnValue(GENERATED_ID);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
         { provide: OrdersRepository, useValue: repository },
+        { provide: INVENTORY_TCP_CLIENT, useValue: inventoryClient },
       ],
     }).compile();
 
@@ -55,53 +79,83 @@ describe('OrdersService', () => {
   });
 
   describe('createOrder', () => {
-    it('calculates totalAmount from items, sets PENDING status and hands the repository an event factory', async () => {
-      const dto: CreateOrderDto = {
-        userId: 'user-1',
-        items: [
-          { productId: 'p1', productName: 'Product 1', quantity: 2, price: 10 },
-          { productId: 'p2', productName: 'Product 2', quantity: 3, price: 5 },
-        ],
-      };
-      const created = buildOrder({ totalAmount: 35 });
-      repository.create.mockResolvedValue(created);
+    const dto: CreateOrderDto = {
+      userId: 'user-1',
+      items: [
+        { productId: 'p1', productName: 'Product 1', quantity: 2, price: 10 },
+        { productId: 'p2', productName: 'Product 2', quantity: 3, price: 5 },
+      ],
+    };
 
-      const result = await service.createOrder(dto);
+    it('pre-generates the order id and reserves stock over the TCP client before creating the order', async () => {
+      inventoryClient.send.mockReturnValue(
+        of({
+          ok: true,
+          orderId: GENERATED_ID,
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+      );
+      repository.create.mockResolvedValue(buildOrder({ totalAmount: 35 }));
 
+      await service.createOrder(dto, 'corr-123');
+
+      expect(inventoryClient.send).toHaveBeenCalledWith(
+        INVENTORY_PATTERNS.RESERVE,
+        {
+          orderId: GENERATED_ID,
+          items: [
+            { productId: 'p1', quantity: 2 },
+            { productId: 'p2', quantity: 3 },
+          ],
+          correlationId: 'corr-123',
+        },
+      );
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
+          id: GENERATED_ID,
           userId: 'user-1',
-          items: dto.items,
-          notes: null,
           totalAmount: 35,
           status: OrderStatus.PENDING,
         }),
         expect.any(Function),
       );
 
+      const reserveCallOrder = inventoryClient.send.mock.invocationCallOrder[0];
+      const createCallOrder = repository.create.mock.invocationCallOrder[0];
+      expect(reserveCallOrder).toBeLessThan(createCallOrder);
+    });
+
+    it('calculates totalAmount from items and hands the repository a single-element event array', async () => {
+      inventoryClient.send.mockReturnValue(
+        of({ ok: true, orderId: GENERATED_ID, expiresAt: 'x' }),
+      );
+      const created = buildOrder({ totalAmount: 35 });
+      repository.create.mockResolvedValue(created);
+
+      const result = await service.createOrder(dto);
+
       const [, eventFactory] = repository.create.mock.calls[0] as [
         unknown,
         OutboxEventFactory,
       ];
-      const event = eventFactory(created);
-      expect(event).toEqual({
-        eventType: ORDER_EVENTS.STATUS_CHANGED,
-        payload: expect.objectContaining({
-          orderId: created.id,
-          fromStatus: null,
-          toStatus: OrderStatus.PENDING,
-        }),
-      });
+      const events = eventFactory(created);
+      expect(events).toEqual([
+        {
+          eventType: ORDER_EVENTS.STATUS_CHANGED,
+          payload: expect.objectContaining({
+            orderId: created.id,
+            fromStatus: null,
+            toStatus: OrderStatus.PENDING,
+          }),
+        },
+      ]);
       expect(result).toBe(created);
     });
 
     it('attaches the correlation id as event metadata when provided', async () => {
-      const dto: CreateOrderDto = {
-        userId: 'user-1',
-        items: [
-          { productId: 'p1', productName: 'Product 1', quantity: 1, price: 10 },
-        ],
-      };
+      inventoryClient.send.mockReturnValue(
+        of({ ok: true, orderId: GENERATED_ID, expiresAt: 'x' }),
+      );
       const created = buildOrder();
       repository.create.mockResolvedValue(created);
 
@@ -111,17 +165,14 @@ describe('OrdersService', () => {
         unknown,
         OutboxEventFactory,
       ];
-      const event = eventFactory(created);
-      expect(event.payload.metadata).toEqual({ correlationId: 'corr-123' });
+      const events = eventFactory(created);
+      expect(events[0].payload.metadata).toEqual({ correlationId: 'corr-123' });
     });
 
     it('omits metadata when no correlation id is provided', async () => {
-      const dto: CreateOrderDto = {
-        userId: 'user-1',
-        items: [
-          { productId: 'p1', productName: 'Product 1', quantity: 1, price: 10 },
-        ],
-      };
+      inventoryClient.send.mockReturnValue(
+        of({ ok: true, orderId: GENERATED_ID, expiresAt: 'x' }),
+      );
       const created = buildOrder();
       repository.create.mockResolvedValue(created);
 
@@ -131,8 +182,54 @@ describe('OrdersService', () => {
         unknown,
         OutboxEventFactory,
       ];
-      const event = eventFactory(created);
-      expect(event.payload.metadata).toBeUndefined();
+      const events = eventFactory(created);
+      expect(events[0].payload.metadata).toBeUndefined();
+    });
+
+    it('rejects with 409 Conflict when inventory reports insufficient stock, without creating the order', async () => {
+      inventoryClient.send.mockReturnValue(
+        of({
+          ok: false,
+          reason: 'INSUFFICIENT_STOCK',
+          shortfalls: [{ productId: 'p1', requested: 2, available: 1 }],
+        }),
+      );
+
+      await expect(service.createOrder(dto)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 409 Conflict when inventory reports an unknown product (triangulation)', async () => {
+      inventoryClient.send.mockReturnValue(
+        of({ ok: false, reason: 'UNKNOWN_PRODUCT', shortfalls: [] }),
+      );
+
+      await expect(service.createOrder(dto)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 503 Service Unavailable when inventory is unreachable, without creating the order', async () => {
+      inventoryClient.send.mockReturnValue(
+        throwError(() => new Error('ECONNREFUSED')),
+      );
+
+      await expect(service.createOrder(dto)).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 503 Service Unavailable when the reserve call times out (triangulation)', async () => {
+      inventoryClient.send.mockReturnValue(throwError(() => new TimeoutError()));
+
+      await expect(service.createOrder(dto)).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+      expect(repository.create).not.toHaveBeenCalled();
     });
   });
 
@@ -157,7 +254,7 @@ describe('OrdersService', () => {
   });
 
   describe('updateStatus', () => {
-    it('updates status and hands the repository an event factory with fromStatus/toStatus on a valid transition', async () => {
+    it('updates status and hands the repository an event array with order.status_changed and inventory.commit_requested on CONFIRMED', async () => {
       const order = buildOrder({ status: OrderStatus.PENDING });
       repository.findById.mockResolvedValue(order);
       repository.save.mockImplementation(async (o: Order) => o);
@@ -167,17 +264,13 @@ describe('OrdersService', () => {
       });
 
       expect(result.status).toBe(OrderStatus.CONFIRMED);
-      expect(repository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ status: OrderStatus.CONFIRMED }),
-        expect.any(Function),
-      );
-
       const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
         Order,
         OutboxEventFactory,
       ];
-      const event = eventFactory(savedOrder);
-      expect(event).toEqual({
+      const events = eventFactory(savedOrder);
+      expect(events).toHaveLength(2);
+      expect(events[0]).toEqual({
         eventType: ORDER_EVENTS.STATUS_CHANGED,
         payload: expect.objectContaining({
           orderId: order.id,
@@ -185,9 +278,48 @@ describe('OrdersService', () => {
           toStatus: OrderStatus.CONFIRMED,
         }),
       });
+      expect(events[1]).toEqual({
+        eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,
+        payload: expect.objectContaining({ orderId: order.id }),
+      });
     });
 
-    it('attaches the correlation id as event metadata when provided', async () => {
+    it('emits inventory.release_requested on CANCELLED (triangulation)', async () => {
+      const order = buildOrder({ status: OrderStatus.PENDING });
+      repository.findById.mockResolvedValue(order);
+      repository.save.mockImplementation(async (o: Order) => o);
+
+      await service.updateStatus(order.id, { status: OrderStatus.CANCELLED });
+
+      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
+        Order,
+        OutboxEventFactory,
+      ];
+      const events = eventFactory(savedOrder);
+      expect(events).toHaveLength(2);
+      expect(events[1]).toEqual({
+        eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
+        payload: expect.objectContaining({ orderId: order.id }),
+      });
+    });
+
+    it('emits only order.status_changed on a transition that does not touch inventory (SHIPPED)', async () => {
+      const order = buildOrder({ status: OrderStatus.CONFIRMED });
+      repository.findById.mockResolvedValue(order);
+      repository.save.mockImplementation(async (o: Order) => o);
+
+      await service.updateStatus(order.id, { status: OrderStatus.SHIPPED });
+
+      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
+        Order,
+        OutboxEventFactory,
+      ];
+      const events = eventFactory(savedOrder);
+      expect(events).toHaveLength(1);
+      expect(events[0].eventType).toBe(ORDER_EVENTS.STATUS_CHANGED);
+    });
+
+    it('attaches the correlation id as metadata on both events when provided', async () => {
       const order = buildOrder({ status: OrderStatus.PENDING });
       repository.findById.mockResolvedValue(order);
       repository.save.mockImplementation(async (o: Order) => o);
@@ -202,8 +334,9 @@ describe('OrdersService', () => {
         Order,
         OutboxEventFactory,
       ];
-      const event = eventFactory(savedOrder);
-      expect(event.payload.metadata).toEqual({ correlationId: 'corr-456' });
+      const events = eventFactory(savedOrder);
+      expect(events[0].payload.metadata).toEqual({ correlationId: 'corr-456' });
+      expect(events[1].payload.metadata).toEqual({ correlationId: 'corr-456' });
     });
 
     it('throws BadRequestException on an invalid transition (DELIVERED -> PENDING)', async () => {
