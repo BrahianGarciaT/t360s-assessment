@@ -10,7 +10,11 @@ import {
   findLatestOutboxEventForOrder,
   OutboxEventRow,
 } from './helpers/postgres';
-import { waitForAuditLogs, waitUntil } from './helpers/wait';
+import {
+  waitForAuditLogs,
+  waitUntil,
+  withTransientRetry,
+} from './helpers/wait';
 
 const ORDERS_URL = process.env.ORDERS_URL ?? 'http://localhost:3000';
 const AUDIT_URL = process.env.AUDIT_URL ?? 'http://localhost:3001';
@@ -91,9 +95,23 @@ const dockerAvailable = isDockerComposeAvailable();
       stopService('audit');
 
       // 3. Change status — must still commit fast, decoupled from audit.
-      const start = Date.now();
-      const statusRes = await ordersApi.put(`/orders/${orderId}/status`, {
-        status: 'CONFIRMED',
+      //
+      // Wrapped in `withTransientRetry`: this specific request, right after
+      // stopping a sibling container on the same Docker bridge network, is
+      // the one known to occasionally hit a transient ECONNRESET/"socket
+      // hang up" in CI (GitHub Actions' Linux Docker daemon) — not an
+      // `orders` crash (verified via unbroken CI logs across two runs) and
+      // not something the `orders` app can control (the PUT handler never
+      // talks to `audit`). See `withTransientRetry`'s docstring in
+      // `helpers/wait.ts` for the full investigation and evidence. `start`
+      // is captured after any retries so the `elapsedMs` assertion below
+      // still measures only the request that actually succeeded.
+      let start = Date.now();
+      const statusRes = await withTransientRetry(() => {
+        start = Date.now();
+        return ordersApi.put(`/orders/${orderId}/status`, {
+          status: 'CONFIRMED',
+        });
       });
       const elapsedMs = Date.now() - start;
 
