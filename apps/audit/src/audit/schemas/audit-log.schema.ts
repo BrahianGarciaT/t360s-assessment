@@ -5,6 +5,9 @@ export type AuditLogDocument = HydratedDocument<AuditLog>;
 
 @Schema()
 export class AuditLog {
+  @Prop({ required: true, unique: true })
+  eventId!: string;
+
   @Prop({ required: true, index: true })
   orderId!: string;
 

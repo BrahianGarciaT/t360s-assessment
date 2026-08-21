@@ -1,24 +1,15 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
-import { catchError, EMPTY } from 'rxjs';
-import {
-  ORDER_EVENTS,
-  OrderStatus,
-  OrderStatusChangedEvent,
-} from '@app/shared';
+import { ORDER_EVENTS, OrderStatus } from '@app/shared';
 import { OrdersRepository } from './orders.repository';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { SearchOrdersDto } from './dto/search-orders.dto';
 import { Order } from './entities/order.entity';
-import { AUDIT_TCP_CLIENT } from './orders.constants';
 
 const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
@@ -30,12 +21,7 @@ const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 
 @Injectable()
 export class OrdersService {
-  private readonly logger = new Logger(OrdersService.name);
-
-  constructor(
-    private readonly ordersRepository: OrdersRepository,
-    @Inject(AUDIT_TCP_CLIENT) private readonly auditClient: ClientProxy,
-  ) {}
+  constructor(private readonly ordersRepository: OrdersRepository) {}
 
   async createOrder(dto: CreateOrderDto): Promise<Order> {
     const totalAmount = dto.items.reduce(
@@ -43,22 +29,24 @@ export class OrdersService {
       0,
     );
 
-    const order = await this.ordersRepository.create({
-      userId: dto.userId,
-      items: dto.items,
-      notes: dto.notes ?? null,
-      totalAmount,
-      status: OrderStatus.PENDING,
-    });
-
-    this.emitStatusChanged({
-      orderId: order.id,
-      fromStatus: null,
-      toStatus: OrderStatus.PENDING,
-      timestamp: new Date(),
-    });
-
-    return order;
+    return this.ordersRepository.create(
+      {
+        userId: dto.userId,
+        items: dto.items,
+        notes: dto.notes ?? null,
+        totalAmount,
+        status: OrderStatus.PENDING,
+      },
+      (created) => ({
+        eventType: ORDER_EVENTS.STATUS_CHANGED,
+        payload: {
+          orderId: created.id,
+          fromStatus: null,
+          toStatus: OrderStatus.PENDING,
+          timestamp: new Date(),
+        },
+      }),
+    );
   }
 
   async findOne(id: string): Promise<Order> {
@@ -106,30 +94,15 @@ export class OrdersService {
 
     const fromStatus = order.status;
     order.status = dto.status;
-    const updated = await this.ordersRepository.save(order);
 
-    this.emitStatusChanged({
-      orderId: updated.id,
-      fromStatus,
-      toStatus: updated.status,
-      timestamp: new Date(),
-    });
-
-    return updated;
-  }
-
-  private emitStatusChanged(event: OrderStatusChangedEvent): void {
-    this.auditClient
-      .emit(ORDER_EVENTS.STATUS_CHANGED, event)
-      .pipe(
-        catchError((error) => {
-          this.logger.error(
-            `Failed to emit ${ORDER_EVENTS.STATUS_CHANGED} for order ${event.orderId}`,
-            error,
-          );
-          return EMPTY;
-        }),
-      )
-      .subscribe();
+    return this.ordersRepository.save(order, (saved) => ({
+      eventType: ORDER_EVENTS.STATUS_CHANGED,
+      payload: {
+        orderId: saved.id,
+        fromStatus,
+        toStatus: saved.status,
+        timestamp: new Date(),
+      },
+    }));
   }
 }

@@ -1,9 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Order } from './entities/order.entity';
+import { OutboxEvent } from './entities/outbox-event.entity';
 import { OrdersRepository } from './orders.repository';
+import { OutboxRepository } from './outbox.repository';
+import { OutboxPollerService } from './outbox-poller.service';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { AUDIT_TCP_CLIENT } from './orders.constants';
@@ -11,7 +15,8 @@ import { ApiKeyGuard } from '../guards/api-key.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order]),
+    TypeOrmModule.forFeature([Order, OutboxEvent]),
+    ScheduleModule.forRoot(),
     ClientsModule.registerAsync([
       {
         name: AUDIT_TCP_CLIENT,
@@ -28,6 +33,12 @@ import { ApiKeyGuard } from '../guards/api-key.guard';
     ]),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, OrdersRepository, ApiKeyGuard],
+  providers: [
+    OrdersService,
+    OrdersRepository,
+    OutboxRepository,
+    OutboxPollerService,
+    ApiKeyGuard,
+  ],
 })
 export class OrdersModule {}

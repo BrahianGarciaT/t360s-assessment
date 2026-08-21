@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { Order } from './orders/entities/order.entity';
+import { OutboxEvent } from './orders/entities/outbox-event.entity';
 import { OrdersModule } from './orders/orders.module';
 
 @Module({
@@ -28,7 +29,7 @@ import { OrdersModule } from './orders/orders.module';
         username: configService.get<string>('ORDERS_DB_USER'),
         password: configService.get<string>('ORDERS_DB_PASSWORD'),
         database: configService.get<string>('ORDERS_DB_NAME'),
-        entities: [Order],
+        entities: [Order, OutboxEvent],
         synchronize: true,
       }),
       inject: [ConfigService],

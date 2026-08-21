@@ -1,14 +1,19 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
 import { QueryOrdersDto } from './dto/query-orders.dto';
+import { OutboxRepository, OutboxEventInput } from './outbox.repository';
+
+export type OutboxEventFactory = (order: Order) => OutboxEventInput;
 
 @Injectable()
 export class OrdersRepository implements OnModuleInit {
   constructor(
     @InjectRepository(Order)
     private readonly repository: Repository<Order>,
+    private readonly dataSource: DataSource,
+    private readonly outboxRepository: OutboxRepository,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -17,11 +22,22 @@ export class OrdersRepository implements OnModuleInit {
     );
   }
 
-  async create(data: Partial<Order>): Promise<Order> {
-    const order = this.repository.create(data);
-    const saved = await this.repository.save(order);
-    await this.updateSearchVector(saved.id);
-    return saved;
+  /**
+   * Creates the order, refreshes its search vector, and inserts the outbox
+   * event in ONE transaction. If the outbox insert fails, everything rolls
+   * back — the order is never persisted.
+   */
+  async create(
+    data: Partial<Order>,
+    event: OutboxEventFactory,
+  ): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(Order);
+      const order = await orderRepo.save(orderRepo.create(data));
+      await this.updateSearchVector(manager, order.id);
+      await this.outboxRepository.insertWithin(manager, event(order));
+      return order;
+    });
   }
 
   async findAll(query: QueryOrdersDto): Promise<[Order[], number]> {
@@ -46,10 +62,17 @@ export class OrdersRepository implements OnModuleInit {
     return this.repository.findOne({ where: { id } });
   }
 
-  async save(order: Order): Promise<Order> {
-    const saved = await this.repository.save(order);
-    await this.updateSearchVector(saved.id);
-    return saved;
+  /**
+   * Persists an updated order, refreshes its search vector, and inserts the
+   * outbox event in ONE transaction — same all-or-nothing guarantee as `create`.
+   */
+  async save(order: Order, event: OutboxEventFactory): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      const saved = await manager.getRepository(Order).save(order);
+      await this.updateSearchVector(manager, saved.id);
+      await this.outboxRepository.insertWithin(manager, event(saved));
+      return saved;
+    });
   }
 
   async searchByText(
@@ -71,8 +94,11 @@ export class OrdersRepository implements OnModuleInit {
       .getManyAndCount();
   }
 
-  private async updateSearchVector(id: string): Promise<void> {
-    await this.repository.query(
+  private async updateSearchVector(
+    manager: EntityManager,
+    id: string,
+  ): Promise<void> {
+    await manager.query(
       `UPDATE orders
        SET "searchVector" = to_tsvector('english',
          coalesce(notes, '') || ' ' ||

@@ -321,6 +321,12 @@ THROTTLE_LIMIT=50
 | `THROTTLE_TTL` | Ventana de rate limiting en ms (orders) | `60000` |
 | `THROTTLE_LIMIT` | Requests máximos por ventana (orders) | `100` |
 | `API_KEY` | Clave requerida en el header `x-api-key` (orders) | — |
+| `OUTBOX_POLL_INTERVAL_MS` | Intervalo del poller de `outbox_events` en ms (orders) | `2000` |
+| `OUTBOX_BATCH_SIZE` | Máximo de eventos procesados por tick del poller | `20` |
+| `OUTBOX_MAX_ATTEMPTS` | Intentos antes de marcar un evento como `failed` | `10` |
+| `OUTBOX_SEND_TIMEOUT_MS` | Timeout del `send()` TCP hacia audit por intento, en ms | `5000` |
+| `OUTBOX_BACKOFF_BASE_MS` | Backoff base entre reintentos, en ms (exponencial) | `1000` |
+| `OUTBOX_BACKOFF_MAX_MS` | Techo del backoff exponencial, en ms | `60000` |
 
 ---
 
@@ -339,10 +345,31 @@ El servicio no accede directamente a TypeORM — delega en una clase `OrdersRepo
 Permite compartir `libs/shared` (enums, interfaces, nombres de eventos) entre los dos servicios sin publicar un paquete npm, manteniendo una única fuente de verdad para el dominio.
 
 ### 5. `synchronize: true` en TypeORM
-Habilitado solo para desarrollo. En producción se usarían migraciones explícitas.
+Habilitado solo para desarrollo. En producción se usarían migraciones explícitas. Además de las tablas de dominio, `synchronize: true` también crea `outbox_events` (ver [Entrega confiable de eventos vía outbox transaccional](#7-entrega-confiable-de-eventos-vía-outbox-transaccional)) y su índice compuesto `IDX_OUTBOX_DISPATCH`, ya que es un índice btree plano expresable con el decorador `@Index` de TypeORM — a diferencia del índice GIN de `searchVector`, que sigue necesitando el escape hatch de SQL crudo en `onModuleInit`.
 
 ### 6. `fromStatus: null` en el primer evento de auditoría
 Cuando se crea una orden (estado inicial `PENDING`), no existe estado previo. El campo `fromStatus` se persiste como `null` para representar ese origen.
+
+### 7. Entrega confiable de eventos vía outbox transaccional
+Antes, `orders` emitía el evento `order.status_changed` por TCP (`emit()`) inmediatamente después de escribir en Postgres. Si `audit` estaba caído en ese instante, el evento se perdía para siempre — sin outbox, sin reintento, sin rastro.
+
+Ahora cada cambio de estado escribe, en **una sola transacción** de Postgres, tanto la orden como una fila en `outbox_events` (`status='pending'`). Un poller (`@Interval`, cada `OUTBOX_POLL_INTERVAL_MS`) drena esa tabla y reintenta la entrega con backoff exponencial hasta `OUTBOX_MAX_ATTEMPTS`, después de lo cual el evento queda `failed` (consultable directamente, sin alertas activas — decisión de producto). La entrega ahora usa `send()` en vez de `emit()`: `send()` exige un ack de aplicación real de `audit`, mientras que `emit()` solo confirmaba que los bytes llegaron al socket, no que Mongo persistió el documento.
+
+Esto convierte la garantía de entrega de "mejor esfuerzo" a **al menos una vez**. Como corolario, `audit` puede recibir el mismo evento más de una vez (reintentos del poller) — ver el punto siguiente sobre `eventId` para cómo se deduplica.
+
+**Costo aceptado**: la latencia de auditoría pasa de ser casi inmediata a estar acotada por el intervalo de polling (por defecto 2s, más backoff si `audit` estuvo caído). Se evaluó y descartó disparar el poller inmediatamente tras cada commit (`poller.trigger()`) porque eso volvería a acoplar `orders` al poller por una ganancia de apenas 2 segundos.
+
+#### Deduplicación por `eventId`
+
+Cada evento lleva un `eventId` único (el mismo UUID de la fila en `outbox_events`, generado en `orders` al insertar dentro de la transacción). `AuditLog` tiene un índice único (no sparse, no parcial) sobre `eventId`. Si `audit` recibe un `eventId` que ya procesó, el insert falla con el código de Mongo `11000` (clave duplicada) — `AuditService` captura ese error específico y devuelve el documento existente en vez de lanzar. Esto es intencional: si el reintento del poller propagara un error, el poller seguiría reintentando un evento que `audit` ya registró correctamente, generando reintentos infinitos.
+
+⚠️ **Migración manual requerida**: al introducir el índice único sobre `eventId`, los documentos `AuditLog` preexistentes (que no tienen ese campo) rompen el `autoIndex` de Mongoose al arrancar `audit`. Si ya tenés el proyecto corriendo localmente desde antes de este cambio, corré una vez antes de reiniciar `audit`:
+
+```bash
+docker compose exec mongo mongosh audit_db --eval "db.auditlogs.drop()"
+```
+
+(o, más simple, `docker compose down -v` para reiniciar los volúmenes desde cero). Es una decisión de producto: los logs de auditoría previos a este cambio se consideran datos de prueba descartables, no hay migración de datos.
 
 ---
 
@@ -389,3 +416,16 @@ npm run test:e2e
 | 10 | `POST /orders` con `x-api-key` incorrecto — retorna `401` |
 
 > Los tests corren en serie (`--runInBand`) porque comparten estado: el `orderId` creado en el test 1 se reutiliza en todos los tests siguientes.
+
+### Prueba de resiliencia del outbox (`outbox-resilience.e2e-spec.ts`)
+
+Suite separada que corre después de `order-flow.e2e-spec.ts` (orden alfabético bajo `--runInBand`) para no interferir con el happy path. Demuestra el ciclo completo de outage y recuperación:
+
+1. Detiene el contenedor `audit` con `docker compose stop audit` (no afecta a `orders`: `depends_on: condition: service_healthy` solo gobierna el orden de arranque, no el runtime).
+2. Cambia el estado de una orden — el `PUT` responde `200` en menos de 2s, probando que la escritura queda desacoplada de `audit`.
+3. Verifica, con una conexión directa vía `pg`, que la fila correspondiente en `outbox_events` queda `pending`.
+4. Confirma que `audit` realmente no responde.
+5. Reinicia `audit` con `docker compose start audit` y espera (polling, no `setTimeout` fijo) a que el poller entregue el evento pendiente.
+6. Verifica que existe exactamente un `AuditLog` para esa transición, con `eventId` igual al id de la fila de `outbox_events` (entrega + deduplicación en una sola aserción).
+
+Si el CLI de `docker compose` no está disponible en el entorno donde corre `npm run test:e2e`, la suite se salta automáticamente (`describe.skip`) en vez de fallar.
