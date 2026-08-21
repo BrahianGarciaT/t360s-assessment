@@ -54,6 +54,20 @@ services:
         condition: service_healthy
       audit:
         condition: service_healthy
+    healthcheck:
+      test:
+        - 'CMD'
+        - 'node'
+        - '-e'
+        - |
+          const net = require('net');
+          const c = net.createConnection({ port: 3000, host: 'localhost' });
+          c.on('connect', () => { c.destroy(); process.exit(0); });
+          c.on('error', () => process.exit(1));
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   audit:
     build:
