@@ -21,7 +21,7 @@ Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura
 | Capa | Tecnología |
 |------|-----------|
 | Runtime | Node.js 24 |
-| Framework | NestJS 10 |
+| Framework | NestJS 11 |
 | ORM (orders) | TypeORM |
 | ODM (audit) | Mongoose |
 | DB orders | PostgreSQL 18 |

@@ -32,6 +32,14 @@ export default [
       // Disabled in favor of TS-aware ambient globals (e.g. DOM lib types like
       // `Request`/`Body`) which the core rule misreports as redeclared builtins.
       'no-redeclare': 'off',
+      // Same DOM-lib ambient-global class of false positive as above: the
+      // base (non-TS-aware) `no-undef` rule doesn't see NestJS decorator
+      // imports like `@Body()` as defined once a same-named DOM type (the
+      // Fetch API `Body` interface) exists ambiently. TypeScript's own
+      // compiler already catches genuinely undefined identifiers, so this
+      // is the officially recommended way to avoid the false positive:
+      // https://typescript-eslint.io/troubleshooting/faqs/general/#i-get-errors-from-the-no-undef-rule-about-my-typescript-types-eg-typescript-must-be-defined
+      'no-undef': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
