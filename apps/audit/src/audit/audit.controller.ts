@@ -12,14 +12,20 @@ export class AuditController {
   @MessagePattern(ORDER_EVENTS.STATUS_CHANGED)
   async handleOrderStatusChanged(
     @Payload() event: OrderStatusChangedEvent,
-  ): Promise<void> {
+  ): Promise<{ ok: true; eventId: string }> {
     await this.auditService.createLog({
+      eventId: event.eventId,
       orderId: event.orderId,
       fromStatus: event.fromStatus,
       toStatus: event.toStatus,
       timestamp: new Date(event.timestamp),
       metadata: event.metadata,
     });
+
+    // `send()` on the orders side needs a real application-level ack — a
+    // deterministic plain object avoids serializing a Mongoose document
+    // over TCP (circular refs, driver internals) for no benefit.
+    return { ok: true, eventId: event.eventId };
   }
 
   @Get(':orderId')

@@ -3,6 +3,9 @@ import { IsDate, IsOptional, IsString } from 'class-validator';
 
 export class CreateAuditLogDto {
   @IsString()
+  eventId!: string;
+
+  @IsString()
   orderId!: string;
 
   @IsOptional()

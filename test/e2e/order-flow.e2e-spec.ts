@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { waitForAuditLogs } from './helpers/wait';
 
 const ORDERS_URL = process.env.ORDERS_URL ?? 'http://localhost:3000';
 const AUDIT_URL = process.env.AUDIT_URL ?? 'http://localhost:3001';
@@ -103,7 +104,10 @@ describe('Order flow (e2e)', () => {
   });
 
   it('GET /audit/:orderId — recorded all status changes', async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Delivery latency now depends on the outbox poller's interval
+    // (`OUTBOX_POLL_INTERVAL_MS`, default 2s) instead of being near-immediate,
+    // so a fixed sleep would be either flaky or wastefully slow — poll instead.
+    await waitForAuditLogs(auditApi, orderId, 3, 20_000);
 
     const res = await auditApi.get(`/audit/${orderId}`);
 
