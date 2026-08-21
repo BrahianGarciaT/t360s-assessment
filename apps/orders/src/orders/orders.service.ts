@@ -57,6 +57,16 @@ export class OrdersService {
     return order;
   }
 
+  async findOne(id: string): Promise<Order> {
+    const order = await this.ordersRepository.findById(id);
+
+    if (!order) {
+      throw new NotFoundException(`Order ${id} not found`);
+    }
+
+    return order;
+  }
+
   async findAll(
     query: QueryOrdersDto,
   ): Promise<{ data: Order[]; total: number; page: number; limit: number }> {
