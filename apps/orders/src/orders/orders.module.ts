@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ApiKeyGuard } from '@app/shared';
 import { Order } from './entities/order.entity';
 import { OutboxEvent } from './entities/outbox-event.entity';
 import { OrdersRepository } from './orders.repository';
@@ -12,7 +13,6 @@ import { OutboxPurgeService } from './outbox-purge.service';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { AUDIT_TCP_CLIENT } from './orders.constants';
-import { ApiKeyGuard } from '../guards/api-key.guard';
 
 @Module({
   imports: [
