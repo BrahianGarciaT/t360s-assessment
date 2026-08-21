@@ -20,12 +20,12 @@ Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura
 
 | Capa | Tecnología |
 |------|-----------|
-| Runtime | Node.js 20 |
+| Runtime | Node.js 24 |
 | Framework | NestJS 10 |
 | ORM (orders) | TypeORM |
 | ODM (audit) | Mongoose |
-| DB orders | PostgreSQL 16 |
-| DB audit | MongoDB 7 |
+| DB orders | PostgreSQL 18 |
+| DB audit | MongoDB 8 |
 | Comunicación inter-servicios | NestJS TCP transport |
 | Contenedores | Docker + docker-compose |
 | Lenguaje | TypeScript strict |
@@ -49,7 +49,7 @@ Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura
 ## Requisitos previos
 
 - [Docker](https://www.docker.com/) y Docker Compose
-- (Opcional para desarrollo local) Node.js 20 + npm
+- (Opcional para desarrollo local) Node.js 24 + npm
 
 ---
 

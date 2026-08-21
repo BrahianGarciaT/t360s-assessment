@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: ${ORDERS_DB_USER}
       POSTGRES_PASSWORD: ${ORDERS_DB_PASSWORD}
@@ -18,7 +16,7 @@ services:
       retries: 5
 
   mongo:
-    image: mongo:7
+    image: mongo:8
     ports:
       - '27017:27017'
     networks:
