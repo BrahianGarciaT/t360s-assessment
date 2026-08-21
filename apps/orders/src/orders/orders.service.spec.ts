@@ -94,6 +94,46 @@ describe('OrdersService', () => {
       });
       expect(result).toBe(created);
     });
+
+    it('attaches the correlation id as event metadata when provided', async () => {
+      const dto: CreateOrderDto = {
+        userId: 'user-1',
+        items: [
+          { productId: 'p1', productName: 'Product 1', quantity: 1, price: 10 },
+        ],
+      };
+      const created = buildOrder();
+      repository.create.mockResolvedValue(created);
+
+      await service.createOrder(dto, 'corr-123');
+
+      const [, eventFactory] = repository.create.mock.calls[0] as [
+        unknown,
+        OutboxEventFactory,
+      ];
+      const event = eventFactory(created);
+      expect(event.payload.metadata).toEqual({ correlationId: 'corr-123' });
+    });
+
+    it('omits metadata when no correlation id is provided', async () => {
+      const dto: CreateOrderDto = {
+        userId: 'user-1',
+        items: [
+          { productId: 'p1', productName: 'Product 1', quantity: 1, price: 10 },
+        ],
+      };
+      const created = buildOrder();
+      repository.create.mockResolvedValue(created);
+
+      await service.createOrder(dto);
+
+      const [, eventFactory] = repository.create.mock.calls[0] as [
+        unknown,
+        OutboxEventFactory,
+      ];
+      const event = eventFactory(created);
+      expect(event.payload.metadata).toBeUndefined();
+    });
   });
 
   describe('findOne', () => {
@@ -145,6 +185,25 @@ describe('OrdersService', () => {
           toStatus: OrderStatus.CONFIRMED,
         }),
       });
+    });
+
+    it('attaches the correlation id as event metadata when provided', async () => {
+      const order = buildOrder({ status: OrderStatus.PENDING });
+      repository.findById.mockResolvedValue(order);
+      repository.save.mockImplementation(async (o: Order) => o);
+
+      await service.updateStatus(
+        order.id,
+        { status: OrderStatus.CONFIRMED },
+        'corr-456',
+      );
+
+      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
+        Order,
+        OutboxEventFactory,
+      ];
+      const event = eventFactory(savedOrder);
+      expect(event.payload.metadata).toEqual({ correlationId: 'corr-456' });
     });
 
     it('throws BadRequestException on an invalid transition (DELIVERED -> PENDING)', async () => {

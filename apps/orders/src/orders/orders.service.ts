@@ -23,7 +23,10 @@ const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 export class OrdersService {
   constructor(private readonly ordersRepository: OrdersRepository) {}
 
-  async createOrder(dto: CreateOrderDto): Promise<Order> {
+  async createOrder(
+    dto: CreateOrderDto,
+    correlationId?: string,
+  ): Promise<Order> {
     const totalAmount = dto.items.reduce(
       (sum, item) => sum + item.quantity * item.price,
       0,
@@ -44,6 +47,7 @@ export class OrdersService {
           fromStatus: null,
           toStatus: OrderStatus.PENDING,
           timestamp: new Date(),
+          metadata: correlationId ? { correlationId } : undefined,
         },
       }),
     );
@@ -78,7 +82,11 @@ export class OrdersService {
     return { data, total, page, limit };
   }
 
-  async updateStatus(id: string, dto: UpdateStatusDto): Promise<Order> {
+  async updateStatus(
+    id: string,
+    dto: UpdateStatusDto,
+    correlationId?: string,
+  ): Promise<Order> {
     const order = await this.ordersRepository.findById(id);
 
     if (!order) {
@@ -102,6 +110,7 @@ export class OrdersService {
         fromStatus,
         toStatus: saved.status,
         timestamp: new Date(),
+        metadata: correlationId ? { correlationId } : undefined,
       },
     }));
   }

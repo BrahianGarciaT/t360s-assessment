@@ -1,6 +1,7 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { ClientProxy } from '@nestjs/microservices';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { firstValueFrom, timeout } from 'rxjs';
 import { AUDIT_TCP_CLIENT } from './orders.constants';
 import { OutboxRepository } from './outbox.repository';
@@ -12,13 +13,14 @@ const POLL_INTERVAL_MS = getOutboxConfig().pollIntervalMs;
 
 @Injectable()
 export class OutboxPollerService {
-  private readonly logger = new Logger(OutboxPollerService.name);
   private readonly config: OutboxConfig;
   private running = false;
 
   constructor(
     private readonly outboxRepository: OutboxRepository,
     @Inject(AUDIT_TCP_CLIENT) private readonly auditClient: ClientProxy,
+    @InjectPinoLogger(OutboxPollerService.name)
+    private readonly logger: PinoLogger,
   ) {
     this.config = getOutboxConfig();
   }
@@ -61,8 +63,13 @@ export class OutboxPollerService {
             error,
           );
           this.logger.error(
-            `Failed to deliver outbox event ${row.id} (attempt ${row.attempts})`,
-            error instanceof Error ? error.stack : String(error),
+            {
+              eventId: row.id,
+              attempt: row.attempts,
+              correlationId: extractCorrelationId(row.payload),
+              err: error instanceof Error ? error.stack : String(error),
+            },
+            'Failed to deliver outbox event',
           );
           // Force a fresh socket next tick. Verified (not assumed): once the
           // peer disappears, ClientTCP.connect() otherwise keeps returning
@@ -80,10 +87,14 @@ export class OutboxPollerService {
             this.auditClient.close();
           } catch (closeError) {
             this.logger.error(
-              `auditClient.close() threw while recovering from a delivery failure for event ${row.id}`,
-              closeError instanceof Error
-                ? closeError.stack
-                : String(closeError),
+              {
+                eventId: row.id,
+                err:
+                  closeError instanceof Error
+                    ? closeError.stack
+                    : String(closeError),
+              },
+              'auditClient.close() threw while recovering from a delivery failure',
             );
           }
           break;
@@ -93,4 +104,15 @@ export class OutboxPollerService {
       this.running = false;
     }
   }
+}
+
+function extractCorrelationId(
+  payload: Record<string, unknown>,
+): string | undefined {
+  const metadata = payload.metadata;
+  if (typeof metadata !== 'object' || metadata === null) {
+    return undefined;
+  }
+  const correlationId = (metadata as Record<string, unknown>).correlationId;
+  return typeof correlationId === 'string' ? correlationId : undefined;
 }

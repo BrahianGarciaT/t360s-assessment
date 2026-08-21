@@ -6,6 +6,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -15,6 +16,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
+import { Request } from 'express';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
@@ -34,8 +36,8 @@ export class OrdersController {
   @ApiResponse({ status: 201, description: 'Orden creada correctamente' })
   @ApiResponse({ status: 400, description: 'Datos de la orden inválidos' })
   @ApiResponse({ status: 401, description: 'API key inválida o ausente' })
-  createOrder(@Body() dto: CreateOrderDto) {
-    return this.ordersService.createOrder(dto);
+  createOrder(@Body() dto: CreateOrderDto, @Req() req: Request) {
+    return this.ordersService.createOrder(dto, String(req.id));
   }
 
   @Get('search')
@@ -63,8 +65,12 @@ export class OrdersController {
   @ApiResponse({ status: 400, description: 'Transición de estado inválida' })
   @ApiResponse({ status: 401, description: 'API key inválida o ausente' })
   @ApiResponse({ status: 404, description: 'Orden no encontrada' })
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateStatusDto) {
-    return this.ordersService.updateStatus(id, dto);
+  updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateStatusDto,
+    @Req() req: Request,
+  ) {
+    return this.ordersService.updateStatus(id, dto, String(req.id));
   }
 
   @Get(':id')

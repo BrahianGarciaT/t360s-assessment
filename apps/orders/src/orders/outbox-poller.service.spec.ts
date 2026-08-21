@@ -13,6 +13,7 @@ describe('OutboxPollerService', () => {
     >
   >;
   let auditClient: { send: jest.Mock; close: jest.Mock };
+  let logger: { error: jest.Mock; warn: jest.Mock; info: jest.Mock };
 
   const buildRow = (overrides: Partial<OutboxEvent> = {}): OutboxEvent =>
     ({
@@ -42,10 +43,16 @@ describe('OutboxPollerService', () => {
       send: jest.fn(),
       close: jest.fn(),
     };
+    logger = {
+      error: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+    };
 
     poller = new OutboxPollerService(
       outboxRepository as unknown as OutboxRepository,
       auditClient as never,
+      logger as never,
     );
   });
 

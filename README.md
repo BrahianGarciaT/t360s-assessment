@@ -383,6 +383,13 @@ docker compose exec mongo mongosh audit_db --eval "db.auditlogs.drop()"
 
 (o, más simple, `docker compose down -v` para reiniciar los volúmenes desde cero). Es una decisión de producto: los logs de auditoría previos a este cambio se consideran datos de prueba descartables, no hay migración de datos.
 
+### 8. Logging estructurado con correlation ID (`nestjs-pino`)
+Ambos servicios loguean en JSON estructurado vía `nestjs-pino` (wrapper de `pino` para NestJS) en lugar del logger por defecto de texto plano.
+
+`orders` genera o propaga un correlation ID por request HTTP: si llega el header `x-correlation-id`, se reutiliza; si no, se genera un UUID nuevo. Ese ID se devuelve en la respuesta (mismo header) y viaja como `metadata.correlationId` dentro del evento `order.status_changed` — primero en la fila de `outbox_events`, después en el mensaje TCP que consume `audit`. `audit` lo loguea al recibir el evento y lo persiste en el documento `AuditLog` (el schema ya tenía un campo `metadata` libre). Con eso, un `grep` por el correlation ID en los logs de ambos servicios reconstruye el ciclo de vida completo de una orden: request HTTP → escritura en outbox → entrega TCP → persistencia en audit.
+
+Se descartó `pino-pretty` como transporte: usa worker threads que requieren el módulo por string en runtime, algo frágil bajo el build con webpack de `nest build` (`nest-cli.json` tiene `webpack: true` en ambos apps) y directamente roto en producción, donde el Dockerfile instala con `npm ci --omit=dev` y `pino-pretty` es una devDependency. Los logs salen en JSON siempre, dev y prod por igual — es más simple y evita ese problema de raíz.
+
 ---
 
 ## Tests
