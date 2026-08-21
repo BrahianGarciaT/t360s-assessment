@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, LessThanOrEqual, Repository } from 'typeorm';
+import { EntityManager, LessThan, LessThanOrEqual, Repository } from 'typeorm';
 import { OutboxEvent } from './entities/outbox-event.entity';
 import { calculateBackoffMs, OutboxEventStatus } from './outbox.constants';
 
@@ -88,5 +88,14 @@ export class OutboxRepository {
           : OutboxEventStatus.PENDING,
       lastError: message.slice(0, LAST_ERROR_MAX_LENGTH),
     });
+  }
+
+  /** Purges delivered rows past their retention window. Returns the number of rows removed. */
+  async deleteSentOlderThan(cutoff: Date): Promise<number> {
+    const result = await this.repository.delete({
+      status: OutboxEventStatus.SENT,
+      sentAt: LessThan(cutoff),
+    });
+    return result.affected ?? 0;
   }
 }

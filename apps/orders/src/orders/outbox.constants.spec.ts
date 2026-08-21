@@ -40,6 +40,7 @@ describe('getOutboxConfig', () => {
       sendTimeoutMs: 5000,
       backoffBaseMs: 1000,
       backoffMaxMs: 60000,
+      purgeRetentionDays: 30,
     });
   });
 
@@ -51,6 +52,7 @@ describe('getOutboxConfig', () => {
       OUTBOX_SEND_TIMEOUT_MS: '1500',
       OUTBOX_BACKOFF_BASE_MS: '250',
       OUTBOX_BACKOFF_MAX_MS: '9000',
+      OUTBOX_PURGE_RETENTION_DAYS: '7',
     } as NodeJS.ProcessEnv);
 
     expect(config).toEqual({
@@ -60,6 +62,7 @@ describe('getOutboxConfig', () => {
       sendTimeoutMs: 1500,
       backoffBaseMs: 250,
       backoffMaxMs: 9000,
+      purgeRetentionDays: 7,
     });
   });
 

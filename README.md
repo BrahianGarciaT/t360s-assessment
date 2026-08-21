@@ -339,6 +339,7 @@ THROTTLE_LIMIT=50
 | `OUTBOX_SEND_TIMEOUT_MS` | Timeout del `send()` TCP hacia audit por intento, en ms | `5000` |
 | `OUTBOX_BACKOFF_BASE_MS` | Backoff base entre reintentos, en ms (exponencial) | `1000` |
 | `OUTBOX_BACKOFF_MAX_MS` | Techo del backoff exponencial, en ms | `60000` |
+| `OUTBOX_PURGE_RETENTION_DAYS` | Días que se conserva una fila `sent` de `outbox_events` antes de purgarla | `30` |
 
 ---
 
@@ -389,6 +390,9 @@ Ambos servicios loguean en JSON estructurado vía `nestjs-pino` (wrapper de `pin
 `orders` genera o propaga un correlation ID por request HTTP: si llega el header `x-correlation-id`, se reutiliza; si no, se genera un UUID nuevo. Ese ID se devuelve en la respuesta (mismo header) y viaja como `metadata.correlationId` dentro del evento `order.status_changed` — primero en la fila de `outbox_events`, después en el mensaje TCP que consume `audit`. `audit` lo loguea al recibir el evento y lo persiste en el documento `AuditLog` (el schema ya tenía un campo `metadata` libre). Con eso, un `grep` por el correlation ID en los logs de ambos servicios reconstruye el ciclo de vida completo de una orden: request HTTP → escritura en outbox → entrega TCP → persistencia en audit.
 
 Se descartó `pino-pretty` como transporte: usa worker threads que requieren el módulo por string en runtime, algo frágil bajo el build con webpack de `nest build` (`nest-cli.json` tiene `webpack: true` en ambos apps) y directamente roto en producción, donde el Dockerfile instala con `npm ci --omit=dev` y `pino-pretty` es una devDependency. Los logs salen en JSON siempre, dev y prod por igual — es más simple y evita ese problema de raíz.
+
+### 9. Purga de `outbox_events` por TTL
+El diseño original del outbox transaccional dejaba la purga fuera de alcance: la tabla crece indefinidamente incluso para eventos ya entregados (`status='sent'`). `OutboxPurgeService` corre un job diario (`@Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)` de `@nestjs/schedule`) que borra las filas `sent` más viejas que `OUTBOX_PURGE_RETENTION_DAYS` (default 30). Las filas `pending` o `failed` nunca se tocan — quedan disponibles para inspección manual, igual que hoy.
 
 ---
 

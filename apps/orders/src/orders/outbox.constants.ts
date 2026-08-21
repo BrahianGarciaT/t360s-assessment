@@ -11,6 +11,7 @@ export interface OutboxConfig {
   sendTimeoutMs: number;
   backoffBaseMs: number;
   backoffMaxMs: number;
+  purgeRetentionDays: number;
 }
 
 const DEFAULT_OUTBOX_CONFIG: OutboxConfig = {
@@ -20,6 +21,7 @@ const DEFAULT_OUTBOX_CONFIG: OutboxConfig = {
   sendTimeoutMs: 5000,
   backoffBaseMs: 1000,
   backoffMaxMs: 60000,
+  purgeRetentionDays: 30,
 };
 
 function parseIntEnv(value: string | undefined, fallback: number): number {
@@ -62,6 +64,10 @@ export function getOutboxConfig(
     backoffMaxMs: parseIntEnv(
       env.OUTBOX_BACKOFF_MAX_MS,
       DEFAULT_OUTBOX_CONFIG.backoffMaxMs,
+    ),
+    purgeRetentionDays: parseIntEnv(
+      env.OUTBOX_PURGE_RETENTION_DAYS,
+      DEFAULT_OUTBOX_CONFIG.purgeRetentionDays,
     ),
   };
 }

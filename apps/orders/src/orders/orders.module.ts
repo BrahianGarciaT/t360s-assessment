@@ -8,6 +8,7 @@ import { OutboxEvent } from './entities/outbox-event.entity';
 import { OrdersRepository } from './orders.repository';
 import { OutboxRepository } from './outbox.repository';
 import { OutboxPollerService } from './outbox-poller.service';
+import { OutboxPurgeService } from './outbox-purge.service';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { AUDIT_TCP_CLIENT } from './orders.constants';
@@ -38,6 +39,7 @@ import { ApiKeyGuard } from '../guards/api-key.guard';
     OrdersRepository,
     OutboxRepository,
     OutboxPollerService,
+    OutboxPurgeService,
     ApiKeyGuard,
   ],
 })

@@ -4,7 +4,9 @@ import { OutboxEvent } from './entities/outbox-event.entity';
 import { OutboxEventStatus } from './outbox.constants';
 
 describe('OutboxRepository', () => {
-  let repository: jest.Mocked<Pick<Repository<OutboxEvent>, 'find' | 'update'>>;
+  let repository: jest.Mocked<
+    Pick<Repository<OutboxEvent>, 'find' | 'update' | 'delete'>
+  >;
   let outboxRepository: OutboxRepository;
 
   const buildRow = (overrides: Partial<OutboxEvent> = {}): OutboxEvent =>
@@ -26,6 +28,7 @@ describe('OutboxRepository', () => {
     repository = {
       find: jest.fn(),
       update: jest.fn(),
+      delete: jest.fn(),
     };
     outboxRepository = new OutboxRepository(
       repository as unknown as Repository<OutboxEvent>,
@@ -146,6 +149,28 @@ describe('OutboxRepository', () => {
 
       const [, payload] = repository.update.mock.calls[0];
       expect((payload.lastError as string).length).toBe(1000);
+    });
+  });
+
+  describe('deleteSentOlderThan', () => {
+    it('deletes sent rows past the cutoff and returns the affected count', async () => {
+      repository.delete.mockResolvedValue({ affected: 3, raw: [] });
+      const cutoff = new Date('2026-01-01T00:00:00.000Z');
+
+      const result = await outboxRepository.deleteSentOlderThan(cutoff);
+
+      expect(repository.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ status: OutboxEventStatus.SENT }),
+      );
+      expect(result).toBe(3);
+    });
+
+    it('returns 0 when the driver reports no affected rows', async () => {
+      repository.delete.mockResolvedValue({ affected: null, raw: [] });
+
+      const result = await outboxRepository.deleteSentOlderThan(new Date());
+
+      expect(result).toBe(0);
     });
   });
 });
