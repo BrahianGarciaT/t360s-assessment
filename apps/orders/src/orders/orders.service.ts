@@ -7,7 +7,11 @@ import {
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { catchError, EMPTY } from 'rxjs';
-import { ORDER_EVENTS, OrderStatus, OrderStatusChangedEvent } from '@app/shared';
+import {
+  ORDER_EVENTS,
+  OrderStatus,
+  OrderStatusChangedEvent,
+} from '@app/shared';
 import { OrdersRepository } from './orders.repository';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
@@ -78,7 +82,11 @@ export class OrdersService {
     dto: SearchOrdersDto,
   ): Promise<{ data: Order[]; total: number; page: number; limit: number }> {
     const { q, page = 1, limit = 10 } = dto;
-    const [data, total] = await this.ordersRepository.searchByText(q, page, limit);
+    const [data, total] = await this.ordersRepository.searchByText(
+      q,
+      page,
+      limit,
+    );
     return { data, total, page, limit };
   }
 
