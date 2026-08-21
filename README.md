@@ -1,6 +1,18 @@
 # Orders Audit System
 
-Mini sistema de gestión de órdenes compuesto por dos microservicios NestJS que se comunican entre sí vía TCP. Construido como prueba técnica para el proceso de selección Senior Backend Engineer.
+Sistema de gestión de órdenes compuesto por dos microservicios NestJS que se comunican entre sí vía TCP: uno gestiona el ciclo de vida de las órdenes sobre PostgreSQL, el otro mantiene un log de auditoría inmutable en MongoDB ante cada cambio de estado.
+
+Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura de microservicios en NestJS: comunicación TCP entre servicios, full-text search nativo de PostgreSQL, un repository pattern desacoplado del ORM, y documentación de API con Swagger — todo corriendo con Docker Compose sin dependencias externas.
+
+### Features
+
+- CRUD de órdenes con validación de items y cálculo automático de `totalAmount`
+- Máquina de estados con transiciones válidas (`PENDING → CONFIRMED → SHIPPED → DELIVERED`, con `CANCELLED` como salida)
+- Búsqueda full-text sobre órdenes (PostgreSQL `tsvector` + índice GIN)
+- Log de auditoría inmutable en MongoDB, poblado automáticamente vía eventos TCP
+- Autenticación por API key y rate limiting en el servicio de órdenes
+- Documentación interactiva de la API con Swagger/OpenAPI
+- Suite de tests unitarios y e2e con Jest
 
 ---
 
@@ -114,6 +126,11 @@ GET /orders?userId=user-123
 GET /orders?status=CONFIRMED&userId=user-123&page=1&limit=10
 ```
 
+#### Consultar una orden por id
+```
+GET /orders/:id
+```
+
 #### Cambiar estado de una orden
 ```
 PUT /orders/:id/status
@@ -128,6 +145,17 @@ Content-Type: application/json
 ```bash
 curl http://localhost:3001/audit/<orderId>
 ```
+
+---
+
+## Documentación de la API (Swagger)
+
+Cada servicio expone su propio Swagger UI, generado automáticamente a partir de los DTOs y decoradores de los controllers:
+
+- **orders** → `http://localhost:3000/api`
+- **audit** → `http://localhost:3001/api`
+
+En orders, el Swagger UI incluye el esquema de seguridad `x-api-key` — podés autenticarte desde ahí con el botón "Authorize" para probar los endpoints directamente.
 
 ---
 
@@ -302,7 +330,7 @@ THROTTLE_LIMIT=50
 Los servicios corren en contenedores separados. `EventEmitter` de NestJS es in-process y no funcionaría entre contenedores. Se usa el transport TCP nativo de `@nestjs/microservices`.
 
 ### 2. Validación de quantity en lugar de un campo stock
-El enunciado menciona "validar stock mínimo". Se optó por no agregar un campo `stock` a la entidad `Order` porque no tiene sentido semántico en el contexto de una orden: una orden no tiene stock propio, sino items con cantidades. La validación equivalente y semánticamente correcta es `quantity ≥ 1` por cada item, implementada en el DTO con `@Min(1)`.
+Se optó por no agregar un campo `stock` a la entidad `Order` porque no tiene sentido semántico en el contexto de una orden: una orden no tiene stock propio, sino items con cantidades. La validación equivalente y semánticamente correcta es `quantity ≥ 1` por cada item, implementada en el DTO con `@Min(1)`.
 
 ### 3. Repository pattern
 El servicio no accede directamente a TypeORM — delega en una clase `OrdersRepository` propia. Esto desacopla la lógica de negocio del ORM y facilita el testing.
