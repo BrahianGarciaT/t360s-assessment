@@ -17,12 +17,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
+import { ApiKeyGuard } from '@app/shared';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { SearchOrdersDto } from './dto/search-orders.dto';
-import { ApiKeyGuard } from '../guards/api-key.guard';
 
 @ApiTags('orders')
 @ApiSecurity('x-api-key')
