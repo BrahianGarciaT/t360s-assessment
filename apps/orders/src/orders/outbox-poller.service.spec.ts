@@ -159,8 +159,14 @@ describe('OutboxPollerService', () => {
   });
 
   it('isolates a failed destination: an audit failure closes only auditClient and still delivers a same-tick inventory row', async () => {
-    const auditRowA = buildRow({ id: 'evt-a', eventType: 'order.status_changed' });
-    const auditRowB = buildRow({ id: 'evt-b', eventType: 'order.status_changed' });
+    const auditRowA = buildRow({
+      id: 'evt-a',
+      eventType: 'order.status_changed',
+    });
+    const auditRowB = buildRow({
+      id: 'evt-b',
+      eventType: 'order.status_changed',
+    });
     const inventoryRow = buildRow({
       id: 'evt-c',
       eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,
@@ -204,7 +210,10 @@ describe('OutboxPollerService', () => {
       eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
       payload: { orderId: 'order-5' },
     });
-    const auditRow = buildRow({ id: 'evt-audit', eventType: 'order.status_changed' });
+    const auditRow = buildRow({
+      id: 'evt-audit',
+      eventType: 'order.status_changed',
+    });
     outboxRepository.claimDue.mockResolvedValue([
       inventoryRowA,
       inventoryRowB,

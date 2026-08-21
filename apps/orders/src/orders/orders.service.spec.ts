@@ -21,7 +21,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 jest.mock('crypto', () => ({
   randomUUID: jest.fn(),
 }));
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+
 import { randomUUID } from 'crypto';
 
 const GENERATED_ID = 'order-uuid-1';
@@ -195,9 +195,7 @@ describe('OrdersService', () => {
         }),
       );
 
-      await expect(service.createOrder(dto)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(service.createOrder(dto)).rejects.toThrow(ConflictException);
       expect(repository.create).not.toHaveBeenCalled();
     });
 
@@ -206,9 +204,7 @@ describe('OrdersService', () => {
         of({ ok: false, reason: 'UNKNOWN_PRODUCT', shortfalls: [] }),
       );
 
-      await expect(service.createOrder(dto)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(service.createOrder(dto)).rejects.toThrow(ConflictException);
       expect(repository.create).not.toHaveBeenCalled();
     });
 
@@ -224,7 +220,9 @@ describe('OrdersService', () => {
     });
 
     it('rejects with 503 Service Unavailable when the reserve call times out (triangulation)', async () => {
-      inventoryClient.send.mockReturnValue(throwError(() => new TimeoutError()));
+      inventoryClient.send.mockReturnValue(
+        throwError(() => new TimeoutError()),
+      );
 
       await expect(service.createOrder(dto)).rejects.toThrow(
         ServiceUnavailableException,

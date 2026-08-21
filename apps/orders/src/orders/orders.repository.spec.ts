@@ -59,9 +59,7 @@ describe('OrdersRepository', () => {
       outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
       const eventFactory = jest
         .fn()
-        .mockReturnValue([
-          { eventType: 'order.status_changed', payload: {} },
-        ]);
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       const result = await repository.create(data, eventFactory);
 
@@ -118,9 +116,7 @@ describe('OrdersRepository', () => {
       );
       const eventFactory = jest
         .fn()
-        .mockReturnValue([
-          { eventType: 'order.status_changed', payload: {} },
-        ]);
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       await expect(repository.create(data, eventFactory)).rejects.toThrow(
         'outbox insert failed',
@@ -138,9 +134,7 @@ describe('OrdersRepository', () => {
       outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
       const eventFactory = jest
         .fn()
-        .mockReturnValue([
-          { eventType: 'order.status_changed', payload: {} },
-        ]);
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       const result = await repository.save(order, eventFactory);
 
@@ -185,9 +179,7 @@ describe('OrdersRepository', () => {
       );
       const eventFactory = jest
         .fn()
-        .mockReturnValue([
-          { eventType: 'order.status_changed', payload: {} },
-        ]);
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       await expect(repository.save(order, eventFactory)).rejects.toThrow(
         'outbox insert failed',
