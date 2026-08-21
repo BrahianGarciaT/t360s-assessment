@@ -146,6 +146,11 @@ export class InventoryRepository {
     });
   }
 
+  /** Non-transactional read used by the service's 23505 dedup path. */
+  async findByOrderId(orderId: string): Promise<Reservation | null> {
+    return this.repository.findOne({ where: { orderId } });
+  }
+
   /** Held reservations past their TTL, oldest first — feeds the `@Cron` reaper. */
   async claimExpired(batchSize: number): Promise<Reservation[]> {
     return this.repository.find({
