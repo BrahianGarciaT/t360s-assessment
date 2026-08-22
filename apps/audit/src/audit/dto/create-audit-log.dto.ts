@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDate, IsOptional, IsString } from 'class-validator';
+import { IsDate, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class CreateAuditLogDto {
   @IsString()
@@ -8,12 +8,16 @@ export class CreateAuditLogDto {
   @IsString()
   orderId!: string;
 
+  @IsString()
+  eventType!: string;
+
   @IsOptional()
   @IsString()
   fromStatus!: string | null;
 
+  @IsOptional()
   @IsString()
-  toStatus!: string;
+  toStatus!: string | null;
 
   @IsDate()
   @Type(() => Date)
@@ -21,4 +25,8 @@ export class CreateAuditLogDto {
 
   @IsOptional()
   metadata?: Record<string, any>;
+
+  @IsOptional()
+  @IsObject()
+  details?: Record<string, any> | null;
 }

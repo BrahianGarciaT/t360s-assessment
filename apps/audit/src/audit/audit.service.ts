@@ -42,6 +42,41 @@ export class AuditService {
     }
   }
 
+  /**
+   * Reusa el mismo patrón de dedup por eventId que `createLog`, pero para
+   * eventos de auditoría emitidos por inventory (`inventory.reserved`,
+   * `inventory.committed`, `inventory.released`) — sin `fromStatus`/`toStatus`,
+   * con `details` en su lugar como payload específico del evento.
+   */
+  async createInventoryLog(
+    eventType: string,
+    event: {
+      eventId: string;
+      orderId: string;
+      timestamp: Date;
+      details?: Record<string, any>;
+    },
+  ): Promise<void> {
+    try {
+      const log = new this.auditLogModel({
+        eventId: event.eventId,
+        orderId: event.orderId,
+        eventType,
+        timestamp: event.timestamp,
+        details: event.details ?? null,
+      });
+      await log.save();
+    } catch (error) {
+      if (this.isDuplicateKeyError(error)) {
+        this.logger.warn(
+          `Duplicate eventId ${event.eventId} recibido — se trata como no-op`,
+        );
+        return;
+      }
+      throw error;
+    }
+  }
+
   private isDuplicateKeyError(error: unknown): boolean {
     return (
       typeof error === 'object' &&

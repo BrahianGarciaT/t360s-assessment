@@ -70,12 +70,15 @@ export class InventoryController {
       'Received inventory.release_requested event',
     );
 
-    // Solo la cancelación de una orden dispara este patrón desde orders; la expiración por TTL
-    // se libera internamente mediante el reaper, nunca a través de este patrón TCP.
+    // El caller (cancelación de orders, o el release por reserva huérfana de
+    // reserveStock() en orders.service.ts) indica el motivo real en
+    // `event.reason`; 'cancelled' queda como default porque orders todavía
+    // puede mandar payloads sin ese campo. La expiración por TTL se libera
+    // internamente mediante el reaper, nunca a través de este patrón TCP.
     return this.inventoryService.release(
       event.orderId,
       event.eventId,
-      'cancelled',
+      event.reason ?? 'cancelled',
     );
   }
 

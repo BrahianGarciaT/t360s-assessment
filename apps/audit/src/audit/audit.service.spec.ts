@@ -14,6 +14,7 @@ describe('AuditService', () => {
   const baseDto: CreateAuditLogDto = {
     eventId: 'event-1',
     orderId: 'order-1',
+    eventType: 'order.status_changed',
     fromStatus: null,
     toStatus: 'PENDING',
     timestamp: new Date('2026-01-01T00:00:00.000Z'),
@@ -89,6 +90,50 @@ describe('AuditService', () => {
       findOneMock.mockResolvedValue(null);
 
       await expect(service.createLog(baseDto)).rejects.toThrow('duplicate key');
+    });
+  });
+
+  describe('createInventoryLog', () => {
+    const inventoryEvent = {
+      eventId: 'inv-event-1',
+      orderId: 'order-1',
+      timestamp: new Date('2026-01-01T00:00:00.000Z'),
+      details: { items: [{ productId: 'p1', quantity: 2 }] },
+    };
+
+    it('persists a new log with the given eventType', async () => {
+      saveMock.mockResolvedValue({ ...inventoryEvent, _id: 'mongo-id-2' });
+
+      await service.createInventoryLog('inventory.reserved', inventoryEvent);
+
+      expect(modelConstructorMock).toHaveBeenCalledWith({
+        eventId: inventoryEvent.eventId,
+        orderId: inventoryEvent.orderId,
+        eventType: 'inventory.reserved',
+        timestamp: inventoryEvent.timestamp,
+        details: inventoryEvent.details,
+      });
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('is a no-op (not an error) when eventId already exists (duplicate key E11000)', async () => {
+      const duplicateKeyError = Object.assign(new Error('duplicate key'), {
+        code: 11000,
+      });
+      saveMock.mockRejectedValue(duplicateKeyError);
+
+      await expect(
+        service.createInventoryLog('inventory.reserved', inventoryEvent),
+      ).resolves.toBeUndefined();
+    });
+
+    it('rethrows non-duplicate-key errors', async () => {
+      const otherError = new Error('connection lost');
+      saveMock.mockRejectedValue(otherError);
+
+      await expect(
+        service.createInventoryLog('inventory.reserved', inventoryEvent),
+      ).rejects.toThrow('connection lost');
     });
   });
 

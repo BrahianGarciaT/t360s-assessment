@@ -1,11 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { Inject, Injectable } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { ReserveStockRequest, ReserveStockResponse } from '@app/shared';
+import {
+  INVENTORY_AUDIT_EVENTS,
+  ReserveStockRequest,
+  ReserveStockResponse,
+} from '@app/shared';
 import {
   InventoryRepository,
   ReservationRejectedError,
 } from './inventory.repository';
 import { getInventoryConfig, InventoryConfig } from './inventory.constants';
+import { AUDIT_TCP_CLIENT } from './inventory.constants';
 import { ReleasedReason } from './entities/reservation.entity';
 import { StockItem } from './entities/stock-item.entity';
 
@@ -15,13 +23,17 @@ const POSTGRES_UNIQUE_VIOLATION_ERROR_CODE = '23505';
 @Injectable()
 export class InventoryService {
   private readonly config: InventoryConfig;
+  private readonly apiKey: string;
 
   constructor(
     private readonly repository: InventoryRepository,
+    @Inject(AUDIT_TCP_CLIENT) private readonly auditClient: ClientProxy,
+    private readonly configService: ConfigService,
     @InjectPinoLogger(InventoryService.name)
     private readonly logger: PinoLogger,
   ) {
     this.config = getInventoryConfig();
+    this.apiKey = this.configService.get<string>('API_KEY', '');
   }
 
   /**
@@ -36,6 +48,11 @@ export class InventoryService {
         { orderId: request.orderId, items: request.items },
         this.config.reservationTtlMinutes,
       );
+      this.emitAuditEvent(INVENTORY_AUDIT_EVENTS.RESERVED, {
+        eventId: randomUUID(),
+        orderId: reservation.orderId,
+        details: { items: request.items },
+      });
       return {
         ok: true,
         orderId: reservation.orderId,
@@ -90,6 +107,11 @@ export class InventoryService {
         { orderId, eventId },
         'No reservation found for orderId — ignoring commit (no-op ack)',
       );
+    } else {
+      this.emitAuditEvent(INVENTORY_AUDIT_EVENTS.COMMITTED, {
+        eventId,
+        orderId,
+      });
     }
     return { ok: true, orderId };
   }
@@ -110,6 +132,12 @@ export class InventoryService {
         { orderId, eventId },
         'No reservation found for orderId — ignoring release (no-op ack)',
       );
+    } else {
+      this.emitAuditEvent(INVENTORY_AUDIT_EVENTS.RELEASED, {
+        eventId,
+        orderId,
+        details: { reason },
+      });
     }
     return { ok: true, orderId };
   }
@@ -129,5 +157,42 @@ export class InventoryService {
       error !== null &&
       (error as { code?: string }).code === POSTGRES_UNIQUE_VIOLATION_ERROR_CODE
     );
+  }
+
+  /**
+   * Emite (fire-and-forget, best-effort) un evento de auditoría del lado de
+   * inventory. Nunca debe bloquear ni hacer fallar la operación real: los
+   * errores de emisión solo se loguean como warning, no se reintentan ni se
+   * propagan — la auditoría de inventory es observabilidad, no una garantía
+   * de negocio.
+   */
+  private emitAuditEvent(
+    eventType: string,
+    payload: {
+      eventId: string;
+      orderId: string;
+      details?: Record<string, any>;
+    },
+  ): void {
+    this.auditClient
+      .emit(eventType, {
+        eventId: payload.eventId,
+        orderId: payload.orderId,
+        timestamp: new Date(),
+        details: payload.details,
+        apiKey: this.apiKey,
+      })
+      .subscribe({
+        error: (error: unknown) => {
+          this.logger.warn(
+            {
+              eventType,
+              orderId: payload.orderId,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            'Failed to emit inventory audit event — best-effort, not retried',
+          );
+        },
+      });
   }
 }

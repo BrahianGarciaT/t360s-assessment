@@ -9,10 +9,12 @@ import {
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
   INVENTORY_EVENTS,
   INVENTORY_PATTERNS,
+  InventoryFinalizeEvent,
   ORDER_EVENTS,
   OrderStatus,
   ReserveStockRequest,
@@ -47,6 +49,8 @@ export class OrdersService {
     @Inject(INVENTORY_TCP_CLIENT)
     private readonly inventoryClient: ClientProxy,
     private readonly configService: ConfigService,
+    @InjectPinoLogger(OrdersService.name)
+    private readonly logger: PinoLogger,
   ) {}
 
   async createOrder(
@@ -121,6 +125,7 @@ export class OrdersService {
           .pipe(timeout(this.inventoryConfig.sendTimeoutMs)),
       );
     } catch {
+      this.releaseOrphanedReservation(orderId, correlationId);
       throw new ServiceUnavailableException(
         'Inventory service unavailable — order was not created',
       );
@@ -132,6 +137,46 @@ export class OrdersService {
         shortfalls: response.shortfalls,
       });
     }
+  }
+
+  /**
+   * Best-effort: si inventory en realidad SÍ procesó la reserva después de
+   * que el cliente dejó de esperar (timeout u otro fallo de transporte), esa
+   * reserva queda sosteniendo stock sin ninguna orden detrás — sin este
+   * release, recién se libera cuando vence el TTL (hasta
+   * `INVENTORY_RESERVATION_TTL_MINUTES`). Fire-and-forget: nunca debe
+   * bloquear ni hacer fallar la respuesta 503 que el caller ya recibió — si
+   * también falla, el TTL reaper sigue siendo la red de seguridad final.
+   */
+  private releaseOrphanedReservation(
+    orderId: string,
+    correlationId?: string,
+  ): void {
+    const event: InventoryFinalizeEvent = {
+      eventId: `internal:orphan-release:${orderId}`,
+      orderId,
+      timestamp: new Date(),
+      metadata: correlationId ? { correlationId } : undefined,
+      reason: 'orphaned',
+      apiKey: this.configService.get<string>('API_KEY', ''),
+    };
+
+    this.inventoryClient
+      .send<{ ok: true; orderId: string }, InventoryFinalizeEvent>(
+        INVENTORY_PATTERNS.RELEASE,
+        event,
+      )
+      .subscribe({
+        error: (error: unknown) => {
+          this.logger.warn(
+            {
+              orderId,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            'Best-effort orphaned-reservation release failed — the TTL reaper remains the final safety net',
+          );
+        },
+      });
   }
 
   async findOne(id: string): Promise<Order> {
@@ -215,6 +260,7 @@ export class OrdersService {
                 orderId: saved.id,
                 timestamp: new Date(),
                 metadata,
+                reason: 'cancelled',
               },
             });
           }

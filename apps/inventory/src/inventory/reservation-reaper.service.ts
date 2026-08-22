@@ -2,13 +2,19 @@ import { Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { InventoryRepository } from './inventory.repository';
+import { InventoryService } from './inventory.service';
 import { getInventoryConfig, InventoryConfig } from './inventory.constants';
 
 /**
- * Red de seguridad de compensación para la ventana reserve→commit/cancel: libera
- * reservas `held` que nunca alcanzaron un estado terminal antes de su
- * TTL, devolviendo la cantidad reservada al stock disponible. Sigue el mismo
- * patrón de `OutboxPurgeService` (copia de config + `@Cron`).
+ * Red de seguridad compensatoria para la ventana reserve→commit/cancel:
+ * libera las reservas `held` que nunca llegaron a un estado terminal antes
+ * de su TTL, devolviendo la cantidad reservada al stock disponible. Sigue
+ * el mismo idioma que `OutboxPurgeService` (clon de config + `@Cron`).
+ *
+ * Libera a través de `InventoryService.release()` (no llamando directo a
+ * `InventoryRepository.finalize()`) para que el release por TTL quede
+ * auditado hacia `audit` igual que cualquier otro release — antes este
+ * camino se saltaba la capa de servicio y ese release nunca dejaba rastro.
  */
 @Injectable()
 export class ReservationReaperService {
@@ -16,6 +22,7 @@ export class ReservationReaperService {
 
   constructor(
     private readonly inventoryRepository: InventoryRepository,
+    private readonly inventoryService: InventoryService,
     @InjectPinoLogger(ReservationReaperService.name)
     private readonly logger: PinoLogger,
   ) {
@@ -29,16 +36,15 @@ export class ReservationReaperService {
     );
 
     for (const reservation of expired) {
-      // El reaper es un disparador interno de @Cron, no un evento reentregado
-      // del outbox, así que no hay un `eventId` real que reenviar. Se sintetiza uno para
-      // que esta llamada cumpla el contrato de deduplicación por eventId de finalize(),
-      // tal como lo haría un evento real — determinista y único por
-      // reserva, ya que claimExpired solo devuelve una reserva HELD
-      // una vez (deja de coincidir con el filtro HELD en cuanto se libera).
+      // El reaper es un trigger interno de @Cron, no un evento reentregado
+      // desde el outbox, así que no hay un `eventId` real que reenviar. Se
+      // sintetiza uno para satisfacer el contrato de deduplicación por
+      // eventId de finalize() — determinista y único por reserva, ya que
+      // claimExpired solo devuelve una reserva HELD una única vez (deja de
+      // matchear el filtro HELD apenas se libera).
       try {
-        await this.inventoryRepository.finalize(
+        await this.inventoryService.release(
           reservation.orderId,
-          'release',
           `internal:reaper:${reservation.orderId}`,
           'expired',
         );

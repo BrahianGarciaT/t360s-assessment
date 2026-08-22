@@ -1,17 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getLoggerToken } from 'nestjs-pino';
+import { ConfigService } from '@nestjs/config';
+import { INVENTORY_AUDIT_EVENTS } from '@app/shared';
 import { InventoryService } from './inventory.service';
 import {
   InventoryRepository,
   ReservationRejectedError,
 } from './inventory.repository';
 import { Reservation, ReservationStatus } from './entities/reservation.entity';
+import { AUDIT_TCP_CLIENT } from './inventory.constants';
 
 describe('InventoryService', () => {
   let service: InventoryService;
   let repository: jest.Mocked<
     Pick<InventoryRepository, 'reserve' | 'finalize' | 'findByOrderId'>
   >;
+  let auditClient: { emit: jest.Mock };
 
   const buildReservation = (
     overrides: Partial<Reservation> = {},
@@ -33,11 +37,19 @@ describe('InventoryService', () => {
       finalize: jest.fn(),
       findByOrderId: jest.fn(),
     };
+    auditClient = {
+      emit: jest.fn().mockReturnValue({ subscribe: jest.fn() }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventoryService,
         { provide: InventoryRepository, useValue: repository },
+        { provide: AUDIT_TCP_CLIENT, useValue: auditClient },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('test-api-key') },
+        },
         {
           provide: getLoggerToken(InventoryService.name),
           useValue: { warn: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -66,6 +78,22 @@ describe('InventoryService', () => {
       });
     });
 
+    it('emits an inventory.reserved audit event on first delivery (triangulation)', async () => {
+      const reservation = buildReservation();
+      repository.reserve.mockResolvedValue(reservation);
+
+      await service.reserve({
+        orderId: 'order-1',
+        items: [{ productId: 'p1', quantity: 2 }],
+        apiKey: 'test-api-key',
+      });
+
+      expect(auditClient.emit).toHaveBeenCalledWith(
+        INVENTORY_AUDIT_EVENTS.RESERVED,
+        expect.objectContaining({ orderId: 'order-1' }),
+      );
+    });
+
     it('is a no-op dedup (not an error) when orderId already exists (23505 unique violation)', async () => {
       const duplicateKeyError = Object.assign(new Error('duplicate key'), {
         code: '23505',
@@ -86,6 +114,22 @@ describe('InventoryService', () => {
         orderId: 'order-1',
         expiresAt: existing.expiresAt.toISOString(),
       });
+    });
+
+    it('does not emit an audit event on the duplicate (23505) path — avoids double-auditing a retried reservation', async () => {
+      const duplicateKeyError = Object.assign(new Error('duplicate key'), {
+        code: '23505',
+      });
+      repository.reserve.mockRejectedValue(duplicateKeyError);
+      repository.findByOrderId.mockResolvedValue(buildReservation());
+
+      await service.reserve({
+        orderId: 'order-1',
+        items: [{ productId: 'p1', quantity: 2 }],
+        apiKey: 'test-api-key',
+      });
+
+      expect(auditClient.emit).not.toHaveBeenCalled();
     });
 
     it('rethrows the original duplicate-key error if the existing reservation cannot be found (race condition)', async () => {
@@ -164,6 +208,22 @@ describe('InventoryService', () => {
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
 
+    it('emits an inventory.committed audit event when a reservation was found (triangulation)', async () => {
+      repository.finalize.mockResolvedValue(
+        buildReservation({
+          status: ReservationStatus.COMMITTED,
+          processedEventId: 'event-abc',
+        }),
+      );
+
+      await service.commit('order-1', 'event-abc');
+
+      expect(auditClient.emit).toHaveBeenCalledWith(
+        INVENTORY_AUDIT_EVENTS.COMMITTED,
+        expect.objectContaining({ orderId: 'order-1' }),
+      );
+    });
+
     it('is a no-op ack when the redelivered eventId was already processed (idempotent redelivery, triangulation)', async () => {
       repository.finalize.mockResolvedValue(
         buildReservation({
@@ -189,6 +249,14 @@ describe('InventoryService', () => {
 
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
+
+    it('does not emit an audit event when no reservation was found (no-op)', async () => {
+      repository.finalize.mockResolvedValue(null);
+
+      await service.commit('order-1', 'event-abc');
+
+      expect(auditClient.emit).not.toHaveBeenCalled();
+    });
   });
 
   describe('release', () => {
@@ -211,6 +279,22 @@ describe('InventoryService', () => {
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
 
+    it('emits an inventory.released audit event when a reservation was found (triangulation)', async () => {
+      repository.finalize.mockResolvedValue(
+        buildReservation({
+          status: ReservationStatus.RELEASED,
+          processedEventId: 'event-xyz',
+        }),
+      );
+
+      await service.release('order-1', 'event-xyz', 'cancelled');
+
+      expect(auditClient.emit).toHaveBeenCalledWith(
+        INVENTORY_AUDIT_EVENTS.RELEASED,
+        expect.objectContaining({ orderId: 'order-1' }),
+      );
+    });
+
     it('is a no-op ack when the reservation is already released under this eventId (idempotent redelivery)', async () => {
       repository.finalize.mockResolvedValue(
         buildReservation({
@@ -226,6 +310,14 @@ describe('InventoryService', () => {
       );
 
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
+    });
+
+    it('does not emit an audit event when no reservation was found (no-op)', async () => {
+      repository.finalize.mockResolvedValue(null);
+
+      await service.release('order-1', 'event-xyz', 'cancelled');
+
+      expect(auditClient.emit).not.toHaveBeenCalled();
     });
   });
 

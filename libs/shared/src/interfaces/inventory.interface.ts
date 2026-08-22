@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import {
   IsArray,
   IsDate,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsObject,
@@ -72,6 +73,11 @@ export class InventoryFinalizeEvent {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  /** Solo aplica a inventory.release — inventory.commit lo ignora. */
+  @IsOptional()
+  @IsIn(['cancelled', 'expired', 'orphaned'])
+  reason?: 'cancelled' | 'expired' | 'orphaned';
 
   @IsString()
   @IsNotEmpty()

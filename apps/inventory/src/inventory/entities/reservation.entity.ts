@@ -18,7 +18,7 @@ export enum ReservationStatus {
   RELEASED = 'released',
 }
 
-export type ReleasedReason = 'cancelled' | 'expired';
+export type ReleasedReason = 'cancelled' | 'expired' | 'orphaned';
 
 /**
  * `orderId` es la PK: también funciona como clave de idempotencia, de modo que reserve → commit
