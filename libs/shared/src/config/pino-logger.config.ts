@@ -20,6 +20,12 @@ export function createPinoLoggerOptions(serviceName: string): Params {
         return correlationId;
       },
       customProps: (req) => ({ correlationId: req.id }),
+      // Nunca escribas la API key cruda a los logs — el serializer `req` por
+      // defecto de pino-http incluye el objeto `headers` completo.
+      redact: {
+        paths: ['req.headers["x-api-key"]'],
+        censor: '[REDACTED]',
+      },
     },
   };
 }
