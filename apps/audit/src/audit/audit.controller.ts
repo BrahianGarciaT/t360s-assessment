@@ -6,6 +6,7 @@ import {
   ApiKeyGuard,
   ORDER_EVENTS,
   OrderStatusChangedEvent,
+  RpcApiKeyGuard,
 } from '@app/shared';
 import { AuditService } from './audit.service';
 
@@ -18,6 +19,7 @@ export class AuditController {
     private readonly logger: PinoLogger,
   ) {}
 
+  @UseGuards(RpcApiKeyGuard)
   @MessagePattern(ORDER_EVENTS.STATUS_CHANGED)
   async handleOrderStatusChanged(
     @Payload() event: OrderStatusChangedEvent,

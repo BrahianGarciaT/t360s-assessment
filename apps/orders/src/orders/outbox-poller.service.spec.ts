@@ -16,6 +16,7 @@ describe('OutboxPollerService', () => {
   let auditClient: { send: jest.Mock; close: jest.Mock };
   let inventoryClient: { send: jest.Mock; close: jest.Mock };
   let logger: { error: jest.Mock; warn: jest.Mock; info: jest.Mock };
+  let configService: { get: jest.Mock };
 
   const buildRow = (overrides: Partial<OutboxEvent> = {}): OutboxEvent =>
     ({
@@ -54,11 +55,13 @@ describe('OutboxPollerService', () => {
       warn: jest.fn(),
       info: jest.fn(),
     };
+    configService = { get: jest.fn().mockReturnValue('test-api-key') };
 
     poller = new OutboxPollerService(
       outboxRepository as unknown as OutboxRepository,
       auditClient as never,
       inventoryClient as never,
+      configService as never,
       logger as never,
     );
   });
@@ -92,6 +95,7 @@ describe('OutboxPollerService', () => {
     expect(auditClient.send).toHaveBeenCalledWith(row.eventType, {
       eventId: row.id,
       ...row.payload,
+      apiKey: 'test-api-key',
     });
     // markAttempt debe ejecutarse ANTES de send — un crash a mitad del envío reprograma en vez de hacer hot-looping
     const attemptOrder =
@@ -118,7 +122,7 @@ describe('OutboxPollerService', () => {
 
     expect(inventoryClient.send).toHaveBeenCalledWith(
       INVENTORY_PATTERNS.COMMIT,
-      { eventId: row.id, ...row.payload },
+      { eventId: row.id, ...row.payload, apiKey: 'test-api-key' },
     );
     expect(outboxRepository.markSent).toHaveBeenCalledWith(row.id);
     expect(auditClient.send).not.toHaveBeenCalled();
@@ -137,7 +141,7 @@ describe('OutboxPollerService', () => {
 
     expect(inventoryClient.send).toHaveBeenCalledWith(
       INVENTORY_PATTERNS.RELEASE,
-      { eventId: row.id, ...row.payload },
+      { eventId: row.id, ...row.payload, apiKey: 'test-api-key' },
     );
     expect(outboxRepository.markSent).toHaveBeenCalledWith(row.id);
   });

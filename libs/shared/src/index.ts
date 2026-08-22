@@ -6,4 +6,5 @@ export * from './interfaces/inventory.interface';
 export * from './constants/correlation-id';
 export * from './config/pino-logger.config';
 export * from './guards/api-key.guard';
+export * from './guards/rpc-api-key.guard';
 export * from './utils/secure-compare';

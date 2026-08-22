@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { ClientProxy } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { firstValueFrom, timeout } from 'rxjs';
 import { INVENTORY_EVENTS, INVENTORY_PATTERNS } from '@app/shared';
@@ -39,6 +40,7 @@ interface OutboxDestination {
 @Injectable()
 export class OutboxPollerService {
   private readonly config: OutboxConfig;
+  private readonly apiKey: string;
   private running = false;
   private readonly destinations: OutboxDestination[];
 
@@ -46,10 +48,12 @@ export class OutboxPollerService {
     private readonly outboxRepository: OutboxRepository,
     @Inject(AUDIT_TCP_CLIENT) private readonly auditClient: ClientProxy,
     @Inject(INVENTORY_TCP_CLIENT) private readonly inventoryClient: ClientProxy,
+    private readonly configService: ConfigService,
     @InjectPinoLogger(OutboxPollerService.name)
     private readonly logger: PinoLogger,
   ) {
     this.config = getOutboxConfig();
+    this.apiKey = this.configService.get<string>('API_KEY', '');
     this.destinations = [
       {
         name: 'audit',
@@ -159,6 +163,7 @@ export class OutboxPollerService {
           .send(destination.resolvePattern(row.eventType), {
             eventId: row.id,
             ...row.payload,
+            apiKey: this.apiKey,
           })
           .pipe(timeout(this.config.sendTimeoutMs)),
       );
