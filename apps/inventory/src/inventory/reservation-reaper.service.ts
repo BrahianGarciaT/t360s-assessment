@@ -35,12 +35,19 @@ export class ReservationReaperService {
       // same way a real event would — deterministic and unique per
       // reservation, since claimExpired only ever returns a HELD reservation
       // once (it stops matching the HELD filter as soon as it is released).
-      await this.inventoryRepository.finalize(
-        reservation.orderId,
-        'release',
-        `internal:reaper:${reservation.orderId}`,
-        'expired',
-      );
+      try {
+        await this.inventoryRepository.finalize(
+          reservation.orderId,
+          'release',
+          `internal:reaper:${reservation.orderId}`,
+          'expired',
+        );
+      } catch (error) {
+        this.logger.error(
+          { orderId: reservation.orderId, err: error },
+          'Failed to release expired reservation — will retry next tick',
+        );
+      }
     }
 
     if (expired.length > 0) {

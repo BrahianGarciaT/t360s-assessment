@@ -76,4 +76,23 @@ describe('ReservationReaperService', () => {
 
     expect(repository.finalize).not.toHaveBeenCalled();
   });
+
+  it('does not abort the batch when finalize throws for one expired reservation (isolates per-item failures)', async () => {
+    const due = [
+      buildReservation({ orderId: 'order-1' }),
+      buildReservation({ orderId: 'order-2' }),
+    ];
+    repository.claimExpired.mockResolvedValue(due);
+    repository.finalize
+      .mockRejectedValueOnce(new Error('constraint violation'))
+      .mockResolvedValueOnce(buildReservation({ status: ReservationStatus.RELEASED }));
+
+    await expect(service.reap()).resolves.not.toThrow();
+
+    expect(repository.finalize).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'order-1' }),
+      expect.any(String),
+    );
+  });
 });
