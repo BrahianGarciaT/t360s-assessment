@@ -17,7 +17,7 @@ export interface ReserveInput {
 
 export type FinalizeAction = 'commit' | 'release';
 
-/** Thrown when a conditional stock UPDATE affects zero rows — rolls back the whole reserve transaction. */
+/** Se lanza cuando un UPDATE condicional de stock afecta cero filas — revierte toda la transacción de reserve. */
 export class ReservationRejectedError extends Error {
   constructor(
     public readonly reason: 'INSUFFICIENT_STOCK' | 'UNKNOWN_PRODUCT',
@@ -39,24 +39,24 @@ export class InventoryRepository {
   ) {}
 
   /**
-   * All item UPDATEs run in ONE transaction, items summed per productId and
-   * applied in productId ASC order (deterministic lock ordering avoids
-   * deadlocks between two concurrent orders touching the same SKUs in
-   * opposite order). Any conditional UPDATE affecting zero rows throws,
-   * which rolls back every earlier UPDATE in this transaction too.
+   * Todos los UPDATE de items se ejecutan en UNA sola transacción; los items se suman por productId y
+   * se aplican en orden ASC de productId (un orden de bloqueo determinista evita
+   * deadlocks entre dos órdenes concurrentes que tocan los mismos SKUs en
+   * orden opuesto). Cualquier UPDATE condicional que afecte cero filas lanza una excepción,
+   * lo que revierte también todos los UPDATE anteriores en esta transacción.
    */
   async reserve(input: ReserveInput, ttlMinutes: number): Promise<Reservation> {
     const items = this.sumAndSortItems(input.items);
 
     return this.dataSource.transaction(async (manager) => {
       for (const item of items) {
-        // TypeORM's Postgres driver returns a non-SELECT `manager.query()`
-        // result as a `[rows, affectedRowCount]` tuple, not a bare rows
-        // array — destructuring `rows` here (not the tuple itself) is
-        // required, otherwise `rows.length` reads the tuple's own length
-        // (always 2) instead of how many rows the conditional UPDATE
-        // actually matched, silently defeating the oversell-prevention
-        // gate for every reservation, regardless of real availability.
+        // El driver de Postgres de TypeORM devuelve el resultado de un `manager.query()`
+        // que no es un SELECT como una tupla `[rows, affectedRowCount]`, no como un
+        // array de filas plano — desestructurar `rows` aquí (y no la tupla en sí) es
+        // necesario, de lo contrario `rows.length` leería la longitud propia de la tupla
+        // (siempre 2) en lugar de cuántas filas realmente coincidieron con el UPDATE
+        // condicional, anulando silenciosamente la protección contra sobreventa
+        // (oversell) para toda reserva, sin importar la disponibilidad real.
         const [rows]: [unknown[], number] = await manager.query(
           `UPDATE stock_items
              SET reserved = reserved + $1
@@ -102,24 +102,25 @@ export class InventoryRepository {
   }
 
   /**
-   * Idempotent by `eventId`, mirroring `AuditService.createLog`'s
-   * dedup-by-eventId pattern: a redelivered finalize/release event carrying
-   * the SAME `eventId` already recorded on this reservation (`processedEventId`)
-   * is a no-op — this is the primary dedup key, checked before touching stock.
-   * A terminal-state guard remains as a defensive fallback for the (should
-   * never happen in normal operation) case of a DIFFERENT eventId arriving
-   * for an already-terminal reservation — still a safe no-op, never a
-   * double-apply, but distinguished in logging from a true eventId replay.
+   * Idempotente por `eventId`, siguiendo el mismo patrón de deduplicación por eventId
+   * de `AuditService.createLog`: un evento finalize/release reentregado que trae
+   * el MISMO `eventId` ya registrado en esta reserva (`processedEventId`)
+   * es un no-op — esta es la clave de deduplicación principal, verificada antes de tocar el stock.
+   * Se mantiene una protección de estado terminal como respaldo defensivo para el caso
+   * (que no debería ocurrir nunca en operación normal) de que llegue un eventId DISTINTO
+   * para una reserva ya en estado terminal — sigue siendo un no-op seguro, nunca una
+   * doble aplicación, pero se distingue en los logs de una repetición real del mismo eventId.
    *
-   * The reservation read takes a `pessimistic_write` lock (`SELECT ... FOR
-   * UPDATE`) rather than a plain read: under READ COMMITTED, two concurrent
-   * `finalize()` calls for the same `orderId` (e.g. the TTL reaper racing an
-   * outbox-delivered commit) could otherwise both read the row while it's
-   * still `HELD`, both pass the terminal-state guard, and both mutate stock —
-   * one write clobbering the other and risking a stock check-constraint
-   * violation. The lock serializes them: the second call blocks until the
-   * first transaction commits, then reads the POST-finalize state and no-ops
-   * via the terminal-state guard below instead of racing past a stale read.
+   * La lectura de la reserva toma un lock `pessimistic_write` (`SELECT ... FOR
+   * UPDATE`) en lugar de una lectura simple: bajo READ COMMITTED, dos llamadas
+   * concurrentes a `finalize()` para el mismo `orderId` (por ejemplo, el reaper de TTL
+   * compitiendo con un commit entregado por el outbox) podrían de otro modo
+   * leer ambas la fila mientras todavía está `HELD`, pasar ambas la protección de
+   * estado terminal, y mutar ambas el stock — una escritura pisando a la otra y
+   * arriesgando una violación del check-constraint de stock. El lock las serializa:
+   * la segunda llamada se bloquea hasta que la primera transacción hace commit,
+   * luego lee el estado POST-finalize y no hace nada (no-op) mediante la protección
+   * de estado terminal de abajo, en lugar de avanzar sobre una lectura obsoleta.
    */
   async finalize(
     orderId: string,
@@ -177,12 +178,12 @@ export class InventoryRepository {
     });
   }
 
-  /** Non-transactional read used by the service's 23505 dedup path. */
+  /** Lectura no transaccional usada por el camino de deduplicación 23505 del service. */
   async findByOrderId(orderId: string): Promise<Reservation | null> {
     return this.repository.findOne({ where: { orderId } });
   }
 
-  /** Held reservations past their TTL, oldest first — feeds the `@Cron` reaper. */
+  /** Reservas en estado held que superaron su TTL, de más antigua a más reciente — alimenta al reaper `@Cron`. */
   async claimExpired(batchSize: number): Promise<Reservation[]> {
     return this.repository.find({
       where: {
@@ -194,7 +195,7 @@ export class InventoryRepository {
     });
   }
 
-  /** Idempotent upsert backing `PUT /stock/:productId` — a fixture/demo seam, not a restock API. */
+  /** Upsert idempotente que respalda `PUT /stock/:productId` — es un punto de apoyo para fixtures/demo, no una API de reabastecimiento. */
   async upsertStock(productId: string, quantity: number): Promise<StockItem> {
     const existing = await this.stockItemRepository.findOne({
       where: { productId },

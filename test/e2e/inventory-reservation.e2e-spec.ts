@@ -37,12 +37,12 @@ function buildOrderPayload(userId: string, productId: string, qty: number) {
   };
 }
 
-// This spec deliberately stops/starts the `inventory` container (down
-// scenario). It runs first alphabetically among the e2e specs
-// (`inventory-reservation` < `order-flow` < `outbox-resilience`) under
-// `--runInBand`, and its `afterAll` always restores `inventory` before
-// the suite finishes — so the later specs, which both depend on a
-// healthy `inventory` for their own stock seeding, are never perturbed.
+// Este spec detiene/inicia deliberadamente el contenedor `inventory` (escenario
+// down). Se ejecuta primero en orden alfabético entre los specs e2e
+// (`inventory-reservation` < `order-flow` < `outbox-resilience`) bajo
+// `--runInBand`, y su `afterAll` siempre restaura `inventory` antes de
+// que finalice la suite — así los specs posteriores, que dependen ambos de un
+// `inventory` saludable para sembrar su propio stock, nunca se ven afectados.
 const dockerAvailable = isDockerComposeAvailable();
 
 (dockerAvailable ? describe : describe.skip)(
@@ -92,9 +92,9 @@ const dockerAvailable = isDockerComposeAvailable();
       );
 
       expect(res.status).toBe(409);
-      // `ConflictException({ reason, shortfalls })` — passing a plain
-      // object to Nest's HttpException constructor uses it verbatim as
-      // the response body, unwrapped (no `statusCode`/`message` envelope).
+      // `ConflictException({ reason, shortfalls })` — pasar un objeto plano
+      // al constructor de HttpException de Nest lo usa tal cual como
+      // cuerpo de la respuesta, sin envoltorio (sin `statusCode`/`message`).
       expect(res.data.reason).toBe('INSUFFICIENT_STOCK');
       expect(Array.isArray(res.data.shortfalls)).toBe(true);
 
@@ -106,8 +106,8 @@ const dockerAvailable = isDockerComposeAvailable();
       const productId = 'prod-e2e-inv-down';
       const userId = 'user-e2e-inv-down';
 
-      // Seed stock while inventory is still up — the point of this test is
-      // the transport failure, not a shortfall.
+      // Sembrar stock mientras inventory todavía está arriba — el propósito de
+      // este test es la falla de transporte, no un faltante de stock.
       const seedRes = await inventoryApi.put(`/stock/${productId}`, {
         quantity: 100,
       });
@@ -116,9 +116,9 @@ const dockerAvailable = isDockerComposeAvailable();
       stopService('inventory');
 
       try {
-        // Confirm inventory really is down before asserting on the gate —
-        // otherwise a slow container stop could let the request race a
-        // still-healthy instance and produce a false pass.
+        // Confirmar que inventory realmente está caído antes de verificar el gate —
+        // de lo contrario, un stop lento del contenedor podría dejar que la
+        // solicitud compita con una instancia aún saludable y produzca un falso positivo.
         await waitUntil<boolean>(
           async () => {
             const res = await inventoryApi.get('/health').catch(() => null);
@@ -140,8 +140,8 @@ const dockerAvailable = isDockerComposeAvailable();
         const orderCount = await countOrdersByUserId(ordersDbClient, userId);
         expect(orderCount).toBe(0);
       } finally {
-        // Always restart, even if an assertion above failed — otherwise
-        // every later e2e spec in this run starts from a broken state.
+        // Siempre reiniciar, incluso si alguna aserción anterior falló — de lo
+        // contrario, todos los specs e2e posteriores en esta corrida arrancan desde un estado roto.
         startService('inventory');
         await waitUntil<boolean>(
           async () => {
@@ -165,15 +165,33 @@ const dockerAvailable = isDockerComposeAvailable();
       });
       expect(seedRes.status).toBe(200);
 
-      const createRes = await ordersApi.post(
+      // El DNS interno de docker-compose puede tardar unos segundos en
+      // resolver `inventory` desde `orders` justo después del arranque
+      // (getaddrinfo EAI_AGAIN), incluso con el healthcheck ya en verde —
+      // un flake de infraestructura de CI, no de la app (misma clase de
+      // problema que documenta `withTransientRetry` en `helpers/wait.ts`,
+      // ahí para otro código de error). Reintenta puntualmente esta llamada
+      // si responde 503, en vez de fallar duro por una carrera de arranque.
+      let createRes = await ordersApi.post(
         '/orders',
         buildOrderPayload(userId, productId, 10),
       );
+      for (
+        let attempt = 0;
+        createRes.status === 503 && attempt < 3;
+        attempt++
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        createRes = await ordersApi.post(
+          '/orders',
+          buildOrderPayload(userId, productId, 10),
+        );
+      }
       expect(createRes.status).toBe(201);
       const orderId: string = createRes.data.id;
 
-      // Reserve happens synchronously inside POST /orders, before the order
-      // row is even created, so the reservation is visible immediately.
+      // La reserva ocurre de forma síncrona dentro de POST /orders, antes de que
+      // se cree siquiera la fila de la orden, por lo que la reserva es visible de inmediato.
       const reservedStock = (
         await inventoryApi.get<StockLevel>(`/stock/${productId}`)
       ).data;
@@ -185,8 +203,8 @@ const dockerAvailable = isDockerComposeAvailable();
       });
       expect(confirmRes.status).toBe(200);
 
-      // Delivery of `inventory.commit_requested` depends on the outbox
-      // poller's interval — poll instead of a fixed sleep.
+      // La entrega de `inventory.commit_requested` depende del intervalo del
+      // poller del outbox — hacer polling en lugar de un sleep fijo.
       const committedStock = await waitUntil<StockLevel>(
         async () => {
           const res = await inventoryApi.get<StockLevel>(`/stock/${productId}`);
@@ -239,8 +257,8 @@ const dockerAvailable = isDockerComposeAvailable();
         },
       );
 
-      // Cancellation restores availability without touching total quantity
-      // on hand — release, not commit.
+      // La cancelación restaura la disponibilidad sin tocar la cantidad total
+      // en existencia — es release, no commit.
       expect(releasedStock.quantity).toBe(50);
       expect(releasedStock.reserved).toBe(0);
     }, 30_000);
@@ -255,7 +273,7 @@ const dockerAvailable = isDockerComposeAvailable();
       });
       expect(seedRes.status).toBe(200);
 
-      // Reserve the entire stock and never confirm or cancel it.
+      // Reservar todo el stock y nunca confirmarlo ni cancelarlo.
       const createRes = await ordersApi.post(
         '/orders',
         buildOrderPayload(firstUserId, productId, 10),
@@ -268,22 +286,22 @@ const dockerAvailable = isDockerComposeAvailable();
       ).data;
       expect(heldStock.reserved).toBe(10);
 
-      // A second order for the same fully-reserved product must be
-      // rejected while the first reservation is still held.
+      // Una segunda orden para el mismo producto totalmente reservado debe ser
+      // rechazada mientras la primera reserva se mantenga vigente.
       const shortfallRes = await ordersApi.post(
         '/orders',
         buildOrderPayload(secondUserId, productId, 10),
       );
       expect(shortfallRes.status).toBe(409);
 
-      // Force the held reservation's TTL into the past instead of sleeping
-      // the real 15-minute `INVENTORY_RESERVATION_TTL_MINUTES` window — see
-      // `forceExpireReservation`'s docstring for why this is the only
-      // test-friendly option without restarting the `inventory` container.
+      // Forzar el TTL de la reserva retenida hacia el pasado en lugar de esperar
+      // la ventana real de 15 minutos de `INVENTORY_RESERVATION_TTL_MINUTES` — ver
+      // el docstring de `forceExpireReservation` para entender por qué esta es la
+      // única opción viable para tests sin reiniciar el contenedor `inventory`.
       await forceExpireReservation(inventoryDbClient, heldOrderId);
 
-      // `ReservationReaperService` runs on `@Cron(EVERY_MINUTE)`, so the
-      // next tick auto-releases it within roughly a minute.
+      // `ReservationReaperService` se ejecuta con `@Cron(EVERY_MINUTE)`, por lo que
+      // el próximo tick la auto-libera en aproximadamente un minuto.
       const autoReleasedStock = await waitUntil<StockLevel>(
         async () => {
           const res = await inventoryApi.get<StockLevel>(`/stock/${productId}`);
@@ -297,8 +315,8 @@ const dockerAvailable = isDockerComposeAvailable();
       expect(autoReleasedStock.quantity).toBe(10);
       expect(autoReleasedStock.reserved).toBe(0);
 
-      // Proof the released stock is genuinely available again: a brand
-      // new order for the full quantity now succeeds.
+      // Prueba de que el stock liberado está genuinamente disponible de nuevo: una
+      // orden completamente nueva por la cantidad total ahora tiene éxito.
       const secondCreateRes = await ordersApi.post(
         '/orders',
         buildOrderPayload(secondUserId, productId, 10),
@@ -307,20 +325,21 @@ const dockerAvailable = isDockerComposeAvailable();
     }, 120_000);
 
     it('never oversells under truly concurrent reservations against the same SKU', async () => {
-      // Design's own testing strategy (obs #210) calls for "N parallel
-      // reserves against real Postgres; assert reserved <= quantity" as an
-      // Integration-level proof. This repo has no lighter-weight
-      // DB-integration harness that talks to inventory's real Postgres
-      // instance outside this e2e layer (unit specs mock `manager.query()`
-      // entirely — sequential mock calls cannot prove concurrent-request
-      // safety), so this fires truly concurrent HTTP requests at the real
-      // running stack (orders -> TCP -> inventory -> real conditional
-      // UPDATE against real Postgres), which is the only way to exercise
-      // genuine DB-level concurrency rather than sequential app-level calls.
+      // La propia estrategia de testing del diseño (obs #210) exige "N reservas
+      // paralelas contra Postgres real; verificar reserved <= quantity" como
+      // prueba a nivel de Integration. Este repo no tiene un harness de
+      // integración con la BD más liviano que hable con la instancia real de
+      // Postgres de inventory fuera de esta capa e2e (los specs unitarios simulan
+      // `manager.query()` por completo — las llamadas mock secuenciales no pueden
+      // probar la seguridad ante solicitudes concurrentes), por lo que aquí se
+      // disparan solicitudes HTTP verdaderamente concurrentes contra el stack real
+      // en ejecución (orders -> TCP -> inventory -> UPDATE condicional real
+      // contra Postgres real), que es la única forma de ejercitar concurrencia
+      // genuina a nivel de BD en lugar de llamadas secuenciales a nivel de aplicación.
       const productId = 'prod-e2e-inv-concurrent';
       const seedQuantity = 10;
       const qtyPerOrder = 3;
-      const concurrentOrderCount = 5; // 5 * 3 = 15 requested vs 10 available
+      const concurrentOrderCount = 5; // 5 * 3 = 15 solicitadas vs 10 disponibles
 
       const seedRes = await inventoryApi.put(`/stock/${productId}`, {
         quantity: seedQuantity,
@@ -332,9 +351,9 @@ const dockerAvailable = isDockerComposeAvailable();
         (_, i) => `user-e2e-inv-concurrent-${i}`,
       );
 
-      // Promise.all fires every POST /orders in parallel — no await between
-      // requests — so all five reservation attempts race each other inside
-      // inventory's real Postgres transaction, not one-at-a-time.
+      // Promise.all dispara cada POST /orders en paralelo — sin await entre
+      // solicitudes — de modo que los cinco intentos de reserva compiten entre sí
+      // dentro de la transacción real de Postgres de inventory, no uno a la vez.
       const results = await Promise.all(
         userIds.map((userId) =>
           ordersApi.post(
@@ -347,9 +366,9 @@ const dockerAvailable = isDockerComposeAvailable();
       const succeeded = results.filter((res) => res.status === 201);
       const rejected = results.filter((res) => res.status === 409);
 
-      // Exactly floor(10/3) = 3 orders fit; the deterministic COUNT proves
-      // no double-acceptance happened under real concurrency, regardless of
-      // which 3 of the 5 concurrent requests actually won the row lock.
+      // Exactamente floor(10/3) = 3 órdenes caben; el COUNT determinístico prueba
+      // que no ocurrió doble aceptación bajo concurrencia real, sin importar
+      // cuáles 3 de las 5 solicitudes concurrentes ganaron efectivamente el row lock.
       const expectedSuccessCount = Math.floor(seedQuantity / qtyPerOrder);
       expect(succeeded.length).toBe(expectedSuccessCount);
       expect(rejected.length).toBe(concurrentOrderCount - expectedSuccessCount);
@@ -360,8 +379,8 @@ const dockerAvailable = isDockerComposeAvailable();
       const finalStock = (
         await inventoryApi.get<StockLevel>(`/stock/${productId}`)
       ).data;
-      // The core "no oversell" guarantee: total reserved quantity never
-      // exceeds available stock, proven against real concurrent writers.
+      // La garantía central de "no oversell": la cantidad total reservada nunca
+      // excede el stock disponible, probado contra escritores concurrentes reales.
       expect(finalStock.reserved).toBeLessThanOrEqual(finalStock.quantity);
       expect(finalStock.reserved).toBe(succeeded.length * qtyPerOrder);
       expect(finalStock.quantity).toBe(seedQuantity);

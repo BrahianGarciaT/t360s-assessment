@@ -1,13 +1,46 @@
-export interface ReserveStockItem {
-  productId: string;
-  quantity: number;
+import 'reflect-metadata';
+import {
+  IsArray,
+  IsDate,
+  IsIn,
+  IsNotEmpty,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsPositive,
+  IsString,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class ReserveStockItem {
+  @IsString()
+  @IsNotEmpty()
+  productId!: string;
+
+  @IsNumber()
+  @IsPositive()
+  quantity!: number;
 }
 
-export interface ReserveStockRequest {
-  /** Idempotency key — mirrors `reservations.orderId` PK. */
-  orderId: string;
-  items: ReserveStockItem[];
+/** Clave de idempotencia — refleja la PK de `reservations.orderId`. */
+export class ReserveStockRequest {
+  @IsUUID()
+  orderId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ReserveStockItem)
+  items!: ReserveStockItem[];
+
+  @IsOptional()
+  @IsString()
   correlationId?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  apiKey!: string;
 }
 
 export interface StockShortfall {
@@ -24,10 +57,29 @@ export type ReserveStockResponse =
       shortfalls: StockShortfall[];
     };
 
-/** Carried by the outbox, so `eventId` is present exactly like `OrderStatusChangedEvent`. */
-export interface InventoryFinalizeEvent {
-  eventId: string;
-  orderId: string;
-  timestamp: Date;
+/** Transportado por el outbox, por lo que `eventId` está presente igual que en `OrderStatusChangedEvent`. */
+export class InventoryFinalizeEvent {
+  @IsString()
+  @IsNotEmpty()
+  eventId!: string;
+
+  @IsUUID()
+  orderId!: string;
+
+  @Type(() => Date)
+  @IsDate()
+  timestamp!: Date;
+
+  @IsOptional()
+  @IsObject()
   metadata?: Record<string, any>;
+
+  /** Solo aplica a inventory.release — inventory.commit lo ignora. */
+  @IsOptional()
+  @IsIn(['cancelled', 'expired', 'orphaned'])
+  reason?: 'cancelled' | 'expired' | 'orphaned';
+
+  @IsString()
+  @IsNotEmpty()
+  apiKey!: string;
 }

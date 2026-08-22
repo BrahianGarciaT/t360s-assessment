@@ -1,7 +1,6 @@
 import 'reflect-metadata';
 import {
   IsDate,
-  IsEnum,
   IsNotEmpty,
   IsObject,
   IsOptional,
@@ -9,9 +8,9 @@ import {
   IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { OrderStatus } from '../enums/order-status.enum';
 
-export class OrderStatusChangedEvent {
+/** Payload que inventory emite hacia audit para cada cambio real de estado de una reserva. */
+export class InventoryAuditEvent {
   @IsString()
   @IsNotEmpty()
   eventId!: string;
@@ -19,20 +18,13 @@ export class OrderStatusChangedEvent {
   @IsUUID()
   orderId!: string;
 
-  @IsOptional()
-  @IsEnum(OrderStatus)
-  fromStatus!: OrderStatus | null;
-
-  @IsEnum(OrderStatus)
-  toStatus!: OrderStatus;
-
   @Type(() => Date)
   @IsDate()
   timestamp!: Date;
 
   @IsOptional()
   @IsObject()
-  metadata?: Record<string, any>;
+  details?: Record<string, any>;
 
   @IsString()
   @IsNotEmpty()

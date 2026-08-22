@@ -8,6 +8,7 @@ import {
   InventoryFinalizeEvent,
   ReserveStockRequest,
   ReserveStockResponse,
+  RpcApiKeyGuard,
 } from '@app/shared';
 import { InventoryService } from './inventory.service';
 import { SetStockDto } from './dto/set-stock.dto';
@@ -21,6 +22,7 @@ export class InventoryController {
     private readonly logger: PinoLogger,
   ) {}
 
+  @UseGuards(RpcApiKeyGuard)
   @MessagePattern(INVENTORY_PATTERNS.RESERVE)
   async handleReserve(
     @Payload() request: ReserveStockRequest,
@@ -37,6 +39,7 @@ export class InventoryController {
     return this.inventoryService.reserve(request);
   }
 
+  @UseGuards(RpcApiKeyGuard)
   @MessagePattern(INVENTORY_PATTERNS.COMMIT)
   async handleCommit(
     @Payload() event: InventoryFinalizeEvent,
@@ -53,6 +56,7 @@ export class InventoryController {
     return this.inventoryService.commit(event.orderId, event.eventId);
   }
 
+  @UseGuards(RpcApiKeyGuard)
   @MessagePattern(INVENTORY_PATTERNS.RELEASE)
   async handleRelease(
     @Payload() event: InventoryFinalizeEvent,
@@ -66,12 +70,15 @@ export class InventoryController {
       'Received inventory.release_requested event',
     );
 
-    // Only order cancellation drives this pattern from orders; TTL expiry is
-    // released internally by the reaper, never over this TCP pattern.
+    // El caller (cancelación de orders, o el release por reserva huérfana de
+    // reserveStock() en orders.service.ts) indica el motivo real en
+    // `event.reason`; 'cancelled' queda como default porque orders todavía
+    // puede mandar payloads sin ese campo. La expiración por TTL se libera
+    // internamente mediante el reaper, nunca a través de este patrón TCP.
     return this.inventoryService.release(
       event.orderId,
       event.eventId,
-      'cancelled',
+      event.reason ?? 'cancelled',
     );
   }
 

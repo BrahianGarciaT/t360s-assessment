@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'crypto';
 import {
   CanActivate,
   ExecutionContext,
@@ -7,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import { secureCompare } from '../utils/secure-compare';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
@@ -22,11 +22,7 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('Missing x-api-key header');
     }
 
-    const a = Buffer.from(apiKey);
-    const b = Buffer.from(expectedKey);
-    const valid = a.length === b.length && timingSafeEqual(a, b);
-
-    if (!valid) {
+    if (!secureCompare(apiKey, expectedKey)) {
       throw new UnauthorizedException('Invalid API key');
     }
 

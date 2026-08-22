@@ -10,7 +10,11 @@ describe('OrdersRepository', () => {
   let dataSource: { transaction: jest.Mock };
   let outboxRepository: jest.Mocked<Pick<OutboxRepository, 'insertWithin'>>;
   let manager: { getRepository: jest.Mock; query: jest.Mock };
-  let orderManagerRepo: { create: jest.Mock; save: jest.Mock; findOne: jest.Mock };
+  let orderManagerRepo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    findOne: jest.Mock;
+  };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
@@ -27,7 +31,11 @@ describe('OrdersRepository', () => {
     }) as Order;
 
   beforeEach(() => {
-    orderManagerRepo = { create: jest.fn(), save: jest.fn(), findOne: jest.fn() };
+    orderManagerRepo = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn(),
+    };
     manager = {
       getRepository: jest.fn().mockReturnValue(orderManagerRepo),
       query: jest.fn().mockResolvedValue(undefined),
@@ -41,8 +49,9 @@ describe('OrdersRepository', () => {
     outboxRepository = { insertWithin: jest.fn() };
 
     repository = new OrdersRepository(
-      // base repository used only by findAll/findById/save's non-transactional reads,
-      // not exercised by the transactional paths under test here
+      // base repository usado solo por las lecturas no transaccionales de
+      // findAll/findById/save, no se ejerce en los paths transaccionales
+      // que se testean acá
       {} as never,
       dataSource as unknown as DataSource,
       outboxRepository as unknown as OutboxRepository,
@@ -121,8 +130,8 @@ describe('OrdersRepository', () => {
       await expect(repository.create(data, eventFactory)).rejects.toThrow(
         'outbox insert failed',
       );
-      // proves the transaction callback propagated the failure instead of
-      // swallowing it — dataSource.transaction() rolls back on rejection
+      // prueba que el callback de la transacción propagó la falla en vez de
+      // tragársela — dataSource.transaction() hace rollback ante un rechazo
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     });
   });

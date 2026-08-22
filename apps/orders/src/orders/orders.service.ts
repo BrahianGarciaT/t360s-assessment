@@ -8,10 +8,13 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
   INVENTORY_EVENTS,
   INVENTORY_PATTERNS,
+  InventoryFinalizeEvent,
   ORDER_EVENTS,
   OrderStatus,
   ReserveStockRequest,
@@ -45,6 +48,9 @@ export class OrdersService {
     private readonly ordersRepository: OrdersRepository,
     @Inject(INVENTORY_TCP_CLIENT)
     private readonly inventoryClient: ClientProxy,
+    private readonly configService: ConfigService,
+    @InjectPinoLogger(OrdersService.name)
+    private readonly logger: PinoLogger,
   ) {}
 
   async createOrder(
@@ -57,9 +63,9 @@ export class OrdersService {
       0,
     );
 
-    // Reserve stock BEFORE the order transaction — deliberately outside the
-    // local tx (design decision #1). A rejection or transport failure must
-    // never create an order row or a partial reservation.
+    // Reserva el stock ANTES de la transacción de la orden — deliberadamente
+    // fuera de la tx local (decisión de diseño #1). Un rechazo o un fallo de
+    // transporte nunca debe crear una fila de orden ni una reserva parcial.
     await this.reserveStock(id, dto.items, correlationId);
 
     return this.ordersRepository.create(
@@ -87,9 +93,10 @@ export class OrdersService {
   }
 
   /**
-   * Calls `inventory.reserve` synchronously over `INVENTORY_TCP_CLIENT`.
-   * Maps a resolved rejection to 409 and any transport failure/timeout to
-   * 503 — the system never degrades open (design decision #6, spec
+   * Llama a `inventory.reserve` de forma síncrona a través de
+   * `INVENTORY_TCP_CLIENT`. Mapea un rechazo resuelto a 409 y cualquier
+   * fallo de transporte/timeout a 503 — el sistema nunca degrada en modo
+   * abierto (decisión de diseño #6, spec
    * "Hard failure when inventory is unreachable").
    */
   private async reserveStock(
@@ -104,6 +111,7 @@ export class OrdersService {
         quantity: item.quantity,
       })),
       correlationId,
+      apiKey: this.configService.get<string>('API_KEY', ''),
     };
 
     let response: ReserveStockResponse;
@@ -117,6 +125,7 @@ export class OrdersService {
           .pipe(timeout(this.inventoryConfig.sendTimeoutMs)),
       );
     } catch {
+      this.releaseOrphanedReservation(orderId, correlationId);
       throw new ServiceUnavailableException(
         'Inventory service unavailable — order was not created',
       );
@@ -128,6 +137,46 @@ export class OrdersService {
         shortfalls: response.shortfalls,
       });
     }
+  }
+
+  /**
+   * Best-effort: si inventory en realidad SÍ procesó la reserva después de
+   * que el cliente dejó de esperar (timeout u otro fallo de transporte), esa
+   * reserva queda sosteniendo stock sin ninguna orden detrás — sin este
+   * release, recién se libera cuando vence el TTL (hasta
+   * `INVENTORY_RESERVATION_TTL_MINUTES`). Fire-and-forget: nunca debe
+   * bloquear ni hacer fallar la respuesta 503 que el caller ya recibió — si
+   * también falla, el TTL reaper sigue siendo la red de seguridad final.
+   */
+  private releaseOrphanedReservation(
+    orderId: string,
+    correlationId?: string,
+  ): void {
+    const event: InventoryFinalizeEvent = {
+      eventId: `internal:orphan-release:${orderId}`,
+      orderId,
+      timestamp: new Date(),
+      metadata: correlationId ? { correlationId } : undefined,
+      reason: 'orphaned',
+      apiKey: this.configService.get<string>('API_KEY', ''),
+    };
+
+    this.inventoryClient
+      .send<{ ok: true; orderId: string }, InventoryFinalizeEvent>(
+        INVENTORY_PATTERNS.RELEASE,
+        event,
+      )
+      .subscribe({
+        error: (error: unknown) => {
+          this.logger.warn(
+            {
+              orderId,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            'Best-effort orphaned-reservation release failed — the TTL reaper remains the final safety net',
+          );
+        },
+      });
   }
 
   async findOne(id: string): Promise<Order> {
@@ -192,9 +241,9 @@ export class OrdersService {
             },
           ];
 
-          // Same-transaction finalize/release fan-out (design decision #7):
-          // the order status change and the inventory event are
-          // all-or-nothing.
+          // Fan-out de finalize/release en la misma transacción (decisión de
+          // diseño #7): el cambio de estado de la orden y el evento de
+          // inventario son todo-o-nada.
           if (saved.status === OrderStatus.CONFIRMED) {
             events.push({
               eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,
@@ -211,6 +260,7 @@ export class OrdersService {
                 orderId: saved.id,
                 timestamp: new Date(),
                 metadata,
+                reason: 'cancelled',
               },
             });
           }

@@ -34,8 +34,9 @@ function parseIntEnv(value: string | undefined, fallback: number): number {
 }
 
 /**
- * Builds the outbox poller configuration from environment variables,
- * falling back to the documented defaults for missing or invalid values.
+ * Construye la configuración del outbox poller a partir de variables de
+ * entorno, recurriendo a los valores por defecto documentados cuando faltan
+ * o son inválidos.
  */
 export function getOutboxConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -73,8 +74,8 @@ export function getOutboxConfig(
 }
 
 /**
- * Exponential backoff, capped at `maxMs`: base * 2^(attempts-1).
- * attempts=1 -> base, attempts=2 -> 2*base, ... until the cap is reached.
+ * Backoff exponencial, limitado a `maxMs`: base * 2^(attempts-1).
+ * attempts=1 -> base, attempts=2 -> 2*base, ... hasta alcanzar el límite.
  */
 export function calculateBackoffMs(
   attempts: number,

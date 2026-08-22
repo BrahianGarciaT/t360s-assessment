@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import { AuditLog, AuditLogDocument } from './schemas/audit-log.schema';
 import { CreateAuditLogDto } from './dto/create-audit-log.dto';
 
-// MongoDB duplicate-key error code (unique index violation).
+// Código de error de clave duplicada de MongoDB (violación de índice único).
 const MONGO_DUPLICATE_KEY_ERROR_CODE = 11000;
 
 @Injectable()
@@ -17,10 +17,10 @@ export class AuditService {
   ) {}
 
   /**
-   * At-least-once delivery from the outbox poller means the same eventId can
-   * arrive more than once. A duplicate is a successful no-op, not an error —
-   * throwing here would propagate through `send()` and the poller would
-   * retry an event that was already recorded.
+   * La entrega at-least-once del poller del outbox implica que el mismo eventId
+   * puede llegar más de una vez. Un duplicado es un no-op exitoso, no un error —
+   * lanzar una excepción aquí se propagaría a través de `send()` y el poller
+   * reintentaría un evento que ya fue registrado.
    */
   async createLog(dto: CreateAuditLogDto): Promise<AuditLog> {
     try {
@@ -37,6 +37,41 @@ export class AuditService {
         if (existing) {
           return existing;
         }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Reusa el mismo patrón de dedup por eventId que `createLog`, pero para
+   * eventos de auditoría emitidos por inventory (`inventory.reserved`,
+   * `inventory.committed`, `inventory.released`) — sin `fromStatus`/`toStatus`,
+   * con `details` en su lugar como payload específico del evento.
+   */
+  async createInventoryLog(
+    eventType: string,
+    event: {
+      eventId: string;
+      orderId: string;
+      timestamp: Date;
+      details?: Record<string, any>;
+    },
+  ): Promise<void> {
+    try {
+      const log = new this.auditLogModel({
+        eventId: event.eventId,
+        orderId: event.orderId,
+        eventType,
+        timestamp: event.timestamp,
+        details: event.details ?? null,
+      });
+      await log.save();
+    } catch (error) {
+      if (this.isDuplicateKeyError(error)) {
+        this.logger.warn(
+          `Duplicate eventId ${event.eventId} recibido — se trata como no-op`,
+        );
+        return;
       }
       throw error;
     }

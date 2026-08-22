@@ -1,12 +1,12 @@
 import { ReservationReaperService } from './reservation-reaper.service';
 import { InventoryRepository } from './inventory.repository';
+import { InventoryService } from './inventory.service';
 import { Reservation, ReservationStatus } from './entities/reservation.entity';
 
 describe('ReservationReaperService', () => {
   let service: ReservationReaperService;
-  let repository: jest.Mocked<
-    Pick<InventoryRepository, 'claimExpired' | 'finalize'>
-  >;
+  let repository: jest.Mocked<Pick<InventoryRepository, 'claimExpired'>>;
+  let inventoryService: jest.Mocked<Pick<InventoryService, 'release'>>;
   let logger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock };
 
   const buildReservation = (
@@ -26,12 +26,15 @@ describe('ReservationReaperService', () => {
   beforeEach(() => {
     repository = {
       claimExpired: jest.fn(),
-      finalize: jest.fn(),
+    };
+    inventoryService = {
+      release: jest.fn(),
     };
     logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
     service = new ReservationReaperService(
       repository as unknown as InventoryRepository,
+      inventoryService as unknown as InventoryService,
       logger as never,
     );
   });
@@ -42,54 +45,56 @@ describe('ReservationReaperService', () => {
       buildReservation({ orderId: 'order-2' }),
     ];
     repository.claimExpired.mockResolvedValue(due);
-    repository.finalize.mockResolvedValue(
-      buildReservation({ status: ReservationStatus.RELEASED }),
-    );
+    inventoryService.release.mockResolvedValue({
+      ok: true,
+      orderId: 'order-1',
+    });
 
     await service.reap();
 
     expect(repository.claimExpired).toHaveBeenCalledWith(100);
-    expect(repository.finalize).toHaveBeenCalledTimes(2);
-    // The reaper is an internal @Cron trigger, not a redelivered outbox
-    // event, so it synthesizes its own eventId (`internal:reaper:{orderId}`)
-    // to satisfy finalize()'s eventId-keyed dedup contract.
-    expect(repository.finalize).toHaveBeenNthCalledWith(
+    expect(inventoryService.release).toHaveBeenCalledTimes(2);
+    // El reaper es un disparador interno de @Cron, no un evento reentregado
+    // del outbox, así que sintetiza su propio eventId (`internal:reaper:{orderId}`)
+    // para cumplir el contrato de deduplicación por eventId de release().
+    // Ahora pasa por InventoryService.release() (no por
+    // InventoryRepository.finalize() directo) para que el release por TTL
+    // quede auditado hacia audit igual que cualquier otro release.
+    expect(inventoryService.release).toHaveBeenNthCalledWith(
       1,
       'order-1',
-      'release',
       'internal:reaper:order-1',
       'expired',
     );
-    expect(repository.finalize).toHaveBeenNthCalledWith(
+    expect(inventoryService.release).toHaveBeenNthCalledWith(
       2,
       'order-2',
-      'release',
       'internal:reaper:order-2',
       'expired',
     );
   });
 
-  it('does nothing (no finalize calls) when claimExpired finds no due reservations (triangulation)', async () => {
+  it('does nothing (no release calls) when claimExpired finds no due reservations (triangulation)', async () => {
     repository.claimExpired.mockResolvedValue([]);
 
     await service.reap();
 
-    expect(repository.finalize).not.toHaveBeenCalled();
+    expect(inventoryService.release).not.toHaveBeenCalled();
   });
 
-  it('does not abort the batch when finalize throws for one expired reservation (isolates per-item failures)', async () => {
+  it('does not abort the batch when release throws for one expired reservation (isolates per-item failures)', async () => {
     const due = [
       buildReservation({ orderId: 'order-1' }),
       buildReservation({ orderId: 'order-2' }),
     ];
     repository.claimExpired.mockResolvedValue(due);
-    repository.finalize
+    inventoryService.release
       .mockRejectedValueOnce(new Error('constraint violation'))
-      .mockResolvedValueOnce(buildReservation({ status: ReservationStatus.RELEASED }));
+      .mockResolvedValueOnce({ ok: true, orderId: 'order-2' });
 
     await expect(service.reap()).resolves.not.toThrow();
 
-    expect(repository.finalize).toHaveBeenCalledTimes(2);
+    expect(inventoryService.release).toHaveBeenCalledTimes(2);
     expect(logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ orderId: 'order-1' }),
       expect.any(String),

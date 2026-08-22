@@ -1,34 +1,46 @@
-import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { Inject, Injectable } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { ReserveStockRequest, ReserveStockResponse } from '@app/shared';
+import {
+  INVENTORY_AUDIT_EVENTS,
+  ReserveStockRequest,
+  ReserveStockResponse,
+} from '@app/shared';
 import {
   InventoryRepository,
   ReservationRejectedError,
 } from './inventory.repository';
 import { getInventoryConfig, InventoryConfig } from './inventory.constants';
+import { AUDIT_TCP_CLIENT } from './inventory.constants';
 import { ReleasedReason } from './entities/reservation.entity';
 import { StockItem } from './entities/stock-item.entity';
 
-// Postgres unique-violation SQLSTATE (raised on the reservations.orderId PK).
+// SQLSTATE de violación de unicidad de Postgres (se lanza sobre la PK reservations.orderId).
 const POSTGRES_UNIQUE_VIOLATION_ERROR_CODE = '23505';
 
 @Injectable()
 export class InventoryService {
   private readonly config: InventoryConfig;
+  private readonly apiKey: string;
 
   constructor(
     private readonly repository: InventoryRepository,
+    @Inject(AUDIT_TCP_CLIENT) private readonly auditClient: ClientProxy,
+    private readonly configService: ConfigService,
     @InjectPinoLogger(InventoryService.name)
     private readonly logger: PinoLogger,
   ) {
     this.config = getInventoryConfig();
+    this.apiKey = this.configService.get<string>('API_KEY', '');
   }
 
   /**
-   * At-least-once redelivery from the orders outbox means the same orderId
-   * can arrive more than once. A duplicate is a successful no-op, not an
-   * error — mirrors AuditService.createLog's 11000 catch, but for
-   * Postgres's 23505 unique violation on the reservations.orderId PK.
+   * La reentrega at-least-once desde el outbox de orders implica que el mismo orderId
+   * puede llegar más de una vez. Un duplicado es un no-op exitoso, no un
+   * error — sigue el mismo patrón que el catch de 11000 en AuditService.createLog,
+   * pero para la violación de unicidad 23505 de Postgres sobre la PK reservations.orderId.
    */
   async reserve(request: ReserveStockRequest): Promise<ReserveStockResponse> {
     try {
@@ -36,6 +48,11 @@ export class InventoryService {
         { orderId: request.orderId, items: request.items },
         this.config.reservationTtlMinutes,
       );
+      this.emitAuditEvent(INVENTORY_AUDIT_EVENTS.RESERVED, {
+        eventId: randomUUID(),
+        orderId: reservation.orderId,
+        details: { items: request.items },
+      });
       return {
         ok: true,
         orderId: reservation.orderId,
@@ -70,11 +87,11 @@ export class InventoryService {
   }
 
   /**
-   * Dedup is keyed by `eventId` (mirrors `AuditService.createLog`'s
-   * dedup-by-eventId pattern), with the repository's terminal-state guard
-   * as a defensive fallback: an unknown, already-processed, or already
-   * terminal reservation still acks `{ ok: true }` here — `orders` is
-   * HTTP-only and has no callback channel to react to a late failure.
+   * La deduplicación se indexa por `eventId` (sigue el mismo patrón de deduplicación
+   * por eventId de `AuditService.createLog`), con la protección de estado terminal
+   * del repository como respaldo defensivo: una reserva desconocida, ya procesada, o
+   * ya en estado terminal igualmente responde con ack `{ ok: true }` aquí — `orders`
+   * es solo HTTP y no tiene un canal de callback para reaccionar ante un fallo tardío.
    */
   async commit(
     orderId: string,
@@ -90,6 +107,11 @@ export class InventoryService {
         { orderId, eventId },
         'No reservation found for orderId — ignoring commit (no-op ack)',
       );
+    } else {
+      this.emitAuditEvent(INVENTORY_AUDIT_EVENTS.COMMITTED, {
+        eventId,
+        orderId,
+      });
     }
     return { ok: true, orderId };
   }
@@ -110,11 +132,17 @@ export class InventoryService {
         { orderId, eventId },
         'No reservation found for orderId — ignoring release (no-op ack)',
       );
+    } else {
+      this.emitAuditEvent(INVENTORY_AUDIT_EVENTS.RELEASED, {
+        eventId,
+        orderId,
+        details: { reason },
+      });
     }
     return { ok: true, orderId };
   }
 
-  /** Idempotent fixture/demo seam backing `PUT /stock/:productId` — not a restock API. */
+  /** Punto de apoyo idempotente para fixtures/demo que respalda `PUT /stock/:productId` — no es una API de reabastecimiento. */
   async setStock(productId: string, quantity: number): Promise<StockItem> {
     return this.repository.upsertStock(productId, quantity);
   }
@@ -129,5 +157,42 @@ export class InventoryService {
       error !== null &&
       (error as { code?: string }).code === POSTGRES_UNIQUE_VIOLATION_ERROR_CODE
     );
+  }
+
+  /**
+   * Emite (fire-and-forget, best-effort) un evento de auditoría del lado de
+   * inventory. Nunca debe bloquear ni hacer fallar la operación real: los
+   * errores de emisión solo se loguean como warning, no se reintentan ni se
+   * propagan — la auditoría de inventory es observabilidad, no una garantía
+   * de negocio.
+   */
+  private emitAuditEvent(
+    eventType: string,
+    payload: {
+      eventId: string;
+      orderId: string;
+      details?: Record<string, any>;
+    },
+  ): void {
+    this.auditClient
+      .emit(eventType, {
+        eventId: payload.eventId,
+        orderId: payload.orderId,
+        timestamp: new Date(),
+        details: payload.details,
+        apiKey: this.apiKey,
+      })
+      .subscribe({
+        error: (error: unknown) => {
+          this.logger.warn(
+            {
+              eventType,
+              orderId: payload.orderId,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            'Failed to emit inventory audit event — best-effort, not retried',
+          );
+        },
+      });
   }
 }

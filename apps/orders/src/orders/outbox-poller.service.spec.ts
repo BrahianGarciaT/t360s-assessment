@@ -16,6 +16,7 @@ describe('OutboxPollerService', () => {
   let auditClient: { send: jest.Mock; close: jest.Mock };
   let inventoryClient: { send: jest.Mock; close: jest.Mock };
   let logger: { error: jest.Mock; warn: jest.Mock; info: jest.Mock };
+  let configService: { get: jest.Mock };
 
   const buildRow = (overrides: Partial<OutboxEvent> = {}): OutboxEvent =>
     ({
@@ -54,11 +55,13 @@ describe('OutboxPollerService', () => {
       warn: jest.fn(),
       info: jest.fn(),
     };
+    configService = { get: jest.fn().mockReturnValue('test-api-key') };
 
     poller = new OutboxPollerService(
       outboxRepository as unknown as OutboxRepository,
       auditClient as never,
       inventoryClient as never,
+      configService as never,
       logger as never,
     );
   });
@@ -92,8 +95,9 @@ describe('OutboxPollerService', () => {
     expect(auditClient.send).toHaveBeenCalledWith(row.eventType, {
       eventId: row.id,
       ...row.payload,
+      apiKey: 'test-api-key',
     });
-    // markAttempt must run BEFORE send — a crash mid-send reschedules instead of hot-looping
+    // markAttempt debe ejecutarse ANTES de send — un crash a mitad del envío reprograma en vez de hacer hot-looping
     const attemptOrder =
       outboxRepository.markAttempt.mock.invocationCallOrder[0];
     const sendOrder = auditClient.send.mock.invocationCallOrder[0];
@@ -118,7 +122,7 @@ describe('OutboxPollerService', () => {
 
     expect(inventoryClient.send).toHaveBeenCalledWith(
       INVENTORY_PATTERNS.COMMIT,
-      { eventId: row.id, ...row.payload },
+      { eventId: row.id, ...row.payload, apiKey: 'test-api-key' },
     );
     expect(outboxRepository.markSent).toHaveBeenCalledWith(row.id);
     expect(auditClient.send).not.toHaveBeenCalled();
@@ -137,7 +141,7 @@ describe('OutboxPollerService', () => {
 
     expect(inventoryClient.send).toHaveBeenCalledWith(
       INVENTORY_PATTERNS.RELEASE,
-      { eventId: row.id, ...row.payload },
+      { eventId: row.id, ...row.payload, apiKey: 'test-api-key' },
     );
     expect(outboxRepository.markSent).toHaveBeenCalledWith(row.id);
   });
@@ -182,7 +186,7 @@ describe('OutboxPollerService', () => {
 
     await poller.tick();
 
-    // first audit row: attempted and errored
+    // primera fila de audit: intentada y con error
     expect(outboxRepository.markError).toHaveBeenCalledWith(
       auditRowA.id,
       1,
@@ -190,10 +194,10 @@ describe('OutboxPollerService', () => {
       expect.any(Error),
     );
     expect(auditClient.close).toHaveBeenCalledTimes(1);
-    expect(auditClient.send).toHaveBeenCalledTimes(1); // second audit row skipped (continue, not break)
+    expect(auditClient.send).toHaveBeenCalledTimes(1); // segunda fila de audit omitida (continue, no break)
 
-    // inventory row in the SAME tick was still delivered — the audit failure
-    // never stalls a different destination
+    // la fila de inventory en el MISMO tick igual se entregó — la falla de
+    // audit nunca bloquea un destino distinto
     expect(inventoryClient.send).toHaveBeenCalledTimes(1);
     expect(outboxRepository.markSent).toHaveBeenCalledWith(inventoryRow.id);
     expect(inventoryClient.close).not.toHaveBeenCalled();
@@ -227,7 +231,7 @@ describe('OutboxPollerService', () => {
     await poller.tick();
 
     expect(inventoryClient.close).toHaveBeenCalledTimes(1);
-    expect(inventoryClient.send).toHaveBeenCalledTimes(1); // second inventory row skipped
+    expect(inventoryClient.send).toHaveBeenCalledTimes(1); // segunda fila de inventory omitida
 
     expect(auditClient.send).toHaveBeenCalledTimes(1);
     expect(outboxRepository.markSent).toHaveBeenCalledWith(auditRow.id);
@@ -242,9 +246,10 @@ describe('OutboxPollerService', () => {
       throw new Error('close() blew up');
     });
 
-    // If tick() lets this escape, this await itself would reject — that's
-    // the failure mode this test guards against (an unhandled rejection
-    // from a scheduled tick would otherwise crash the whole process).
+    // Si tick() deja que esto escape, este propio await rechazaría — ese es
+    // el modo de falla contra el que protege este test (un rechazo no
+    // manejado proveniente de un tick programado, de lo contrario, haría
+    // crashear todo el proceso).
     await expect(poller.tick()).resolves.toBeUndefined();
 
     expect(auditClient.close).toHaveBeenCalledTimes(1);
@@ -266,7 +271,7 @@ describe('OutboxPollerService', () => {
     expect(outboxRepository.markError).toHaveBeenCalledWith(
       row.id,
       10,
-      10, // default OUTBOX_MAX_ATTEMPTS
+      10, // OUTBOX_MAX_ATTEMPTS por defecto
       expect.any(Error),
     );
   });

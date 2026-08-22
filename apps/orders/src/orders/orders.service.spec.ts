@@ -5,6 +5,8 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { getLoggerToken } from 'nestjs-pino';
 import { of, throwError, TimeoutError } from 'rxjs';
 import {
   INVENTORY_EVENTS,
@@ -35,6 +37,7 @@ describe('OrdersService', () => {
     >
   >;
   let inventoryClient: { send: jest.Mock };
+  let configService: { get: jest.Mock };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
@@ -60,7 +63,10 @@ describe('OrdersService', () => {
       findById: jest.fn(),
       transitionStatus: jest.fn(),
     };
-    inventoryClient = { send: jest.fn() };
+    inventoryClient = {
+      send: jest.fn().mockReturnValue({ subscribe: jest.fn() }),
+    };
+    configService = { get: jest.fn().mockReturnValue('test-api-key') };
     (randomUUID as jest.Mock).mockReturnValue(GENERATED_ID);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -68,6 +74,11 @@ describe('OrdersService', () => {
         OrdersService,
         { provide: OrdersRepository, useValue: repository },
         { provide: INVENTORY_TCP_CLIENT, useValue: inventoryClient },
+        { provide: ConfigService, useValue: configService },
+        {
+          provide: getLoggerToken(OrdersService.name),
+          useValue: { warn: jest.fn(), error: jest.fn(), info: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -108,6 +119,7 @@ describe('OrdersService', () => {
             { productId: 'p2', quantity: 3 },
           ],
           correlationId: 'corr-123',
+          apiKey: 'test-api-key',
         },
       );
       expect(repository.create).toHaveBeenCalledWith(
@@ -229,6 +241,42 @@ describe('OrdersService', () => {
       );
       expect(repository.create).not.toHaveBeenCalled();
     });
+
+    it('fires a best-effort orphaned-reservation release when the reserve call fails, without blocking the 503 response', async () => {
+      inventoryClient.send.mockReturnValue(
+        throwError(() => new TimeoutError()),
+      );
+
+      await expect(service.createOrder(dto, 'corr-123')).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+
+      expect(inventoryClient.send).toHaveBeenCalledTimes(2);
+      expect(inventoryClient.send).toHaveBeenNthCalledWith(
+        2,
+        INVENTORY_PATTERNS.RELEASE,
+        expect.objectContaining({
+          orderId: GENERATED_ID,
+          reason: 'orphaned',
+          metadata: { correlationId: 'corr-123' },
+          apiKey: 'test-api-key',
+        }),
+      );
+    });
+
+    it('does NOT fire an orphaned-reservation release when inventory responds (even with a rejection) — only on transport failure (triangulation)', async () => {
+      inventoryClient.send.mockReturnValue(
+        of({
+          ok: false,
+          reason: 'INSUFFICIENT_STOCK',
+          shortfalls: [{ productId: 'p1', requested: 2, available: 1 }],
+        }),
+      );
+
+      await expect(service.createOrder(dto)).rejects.toThrow(ConflictException);
+
+      expect(inventoryClient.send).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('findOne', () => {
@@ -252,11 +300,11 @@ describe('OrdersService', () => {
   });
 
   describe('updateStatus', () => {
-    // Mimics the real OrdersRepository#transitionStatus contract: reads the
-    // order, invokes `transition` (which validates + mutates `order.status`
-    // in place and returns the event factory), and resolves the mutated
-    // order — capturing the event factory into `buildEvents` so tests can
-    // assert on the events it produces.
+    // Imita el contrato real de OrdersRepository#transitionStatus: lee la
+    // orden, invoca `transition` (que valida + muta `order.status` in place
+    // y devuelve el event factory), y resuelve la orden mutada — capturando
+    // el event factory en `buildEvents` para que los tests puedan hacer
+    // assert sobre los eventos que produce.
     const mockTransitionStatus = (
       order: Order,
     ): { buildEvents: () => OutboxEventFactory } => {
@@ -305,7 +353,10 @@ describe('OrdersService', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toEqual({
         eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
-        payload: expect.objectContaining({ orderId: order.id }),
+        payload: expect.objectContaining({
+          orderId: order.id,
+          reason: 'cancelled',
+        }),
       });
     });
 

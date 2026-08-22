@@ -34,9 +34,9 @@ const ORDER_PAYLOAD = {
   notes: 'outbox resilience demo',
 };
 
-// This spec deliberately stops/starts the `audit` container. Runs alphabetically
-// after `order-flow.e2e-spec.ts` (`order-flow` < `outbox-resilience`) under
-// `--runInBand`, so it cannot perturb the happy-path suite.
+// Este spec detiene/inicia deliberadamente el contenedor `audit`. Se ejecuta en
+// orden alfabético después de `order-flow.e2e-spec.ts` (`order-flow` < `outbox-resilience`)
+// bajo `--runInBand`, por lo que no puede afectar la suite del camino feliz.
 const dockerAvailable = isDockerComposeAvailable();
 
 (dockerAvailable ? describe : describe.skip)(
@@ -55,6 +55,7 @@ const dockerAvailable = isDockerComposeAvailable();
       });
       auditApi = axios.create({
         baseURL: AUDIT_URL,
+        headers: { 'x-api-key': API_KEY },
         validateStatus: () => true,
         timeout: 8000,
       });
@@ -64,9 +65,9 @@ const dockerAvailable = isDockerComposeAvailable();
         validateStatus: () => true,
       });
 
-      // Gate: POST /orders now reserves stock synchronously against
-      // `inventory` before creating the order (409/503 otherwise). Seed
-      // enough stock for the item this suite's ORDER_PAYLOAD requests.
+      // Gate: POST /orders ahora reserva stock de forma síncrona contra
+      // `inventory` antes de crear la orden (409/503 en caso contrario). Sembrar
+      // stock suficiente para el ítem que el ORDER_PAYLOAD de esta suite solicita.
       const seedRes = await inventoryApi.put('/stock/prod-e2e-resilience', {
         quantity: 1000,
       });
@@ -77,8 +78,8 @@ const dockerAvailable = isDockerComposeAvailable();
     }, 120_000);
 
     afterAll(async () => {
-      // Always restart `audit`, even if an assertion above failed — otherwise
-      // every subsequent test run (local or CI) starts from a broken state.
+      // Siempre reiniciar `audit`, incluso si alguna aserción anterior falló — de lo
+      // contrario, cada corrida de tests posterior (local o CI) arranca desde un estado roto.
       try {
         startService('audit');
         await waitUntil<boolean>(
@@ -99,28 +100,37 @@ const dockerAvailable = isDockerComposeAvailable();
     }, 120_000);
 
     it('commits the status change while audit is down, then delivers once audit recovers', async () => {
-      // 1. Create the order while audit is healthy (baseline audit event #1).
+      // 1. Crear la orden mientras audit está saludable (evento de audit base #1).
       const createRes = await ordersApi.post('/orders', ORDER_PAYLOAD);
       expect(createRes.status).toBe(201);
       const orderId: string = createRes.data.id;
 
-      await waitForAuditLogs(auditApi, orderId, 1, 20_000);
+      // Filtrado a `order.status_changed`: crear la orden también dispara
+      // `inventory.reserved` para la misma `orderId` (evento separado, en el
+      // mismo endpoint) — este paso solo espera el evento de creación de la orden.
+      await waitForAuditLogs(
+        auditApi,
+        orderId,
+        1,
+        20_000,
+        'order.status_changed',
+      );
 
-      // 2. Take audit down.
+      // 2. Derribar audit.
       stopService('audit');
 
-      // 3. Change status — must still commit fast, decoupled from audit.
+      // 3. Cambiar el estado — debe seguir haciendo commit rápido, desacoplado de audit.
       //
-      // Wrapped in `withTransientRetry`: this specific request, right after
-      // stopping a sibling container on the same Docker bridge network, is
-      // the one known to occasionally hit a transient ECONNRESET/"socket
-      // hang up" in CI (GitHub Actions' Linux Docker daemon) — not an
-      // `orders` crash (verified via unbroken CI logs across two runs) and
-      // not something the `orders` app can control (the PUT handler never
-      // talks to `audit`). See `withTransientRetry`'s docstring in
-      // `helpers/wait.ts` for the full investigation and evidence. `start`
-      // is captured after any retries so the `elapsedMs` assertion below
-      // still measures only the request that actually succeeded.
+      // Envuelto en `withTransientRetry`: esta solicitud específica, justo después
+      // de detener un contenedor hermano en la misma red bridge de Docker, es
+      // la que ocasionalmente presenta un ECONNRESET/"socket hang up" transitorio
+      // en CI (el demonio Docker Linux de GitHub Actions) — no es un
+      // crash de `orders` (verificado mediante logs de CI ininterrumpidos en dos corridas) ni
+      // algo que la app `orders` pueda controlar (el handler de PUT nunca
+      // se comunica con `audit`). Ver el docstring de `withTransientRetry` en
+      // `helpers/wait.ts` para la investigación y evidencia completas. `start`
+      // se captura después de cualquier reintento para que la aserción de `elapsedMs` de abajo
+      // siga midiendo únicamente la solicitud que realmente tuvo éxito.
       let start = Date.now();
       const statusRes = await withTransientRetry(() => {
         start = Date.now();
@@ -134,11 +144,11 @@ const dockerAvailable = isDockerComposeAvailable();
       expect(statusRes.data.status).toBe('CONFIRMED');
       expect(elapsedMs).toBeLessThan(2000);
 
-      // 4. The outbox event for this transition is pending in Postgres.
-      // Pinned to `order.status_changed`: CONFIRMED now also fans out an
-      // `inventory.commit_requested` row in the same transaction, and
-      // inventory (never taken down in this suite) delivers independently
-      // of audit's outage — "latest" without a type filter would race.
+      // 4. El evento del outbox para esta transición está pendiente en Postgres.
+      // Fijado a `order.status_changed`: CONFIRMED ahora también genera una
+      // fila de `inventory.commit_requested` en la misma transacción, e
+      // inventory (nunca derribado en esta suite) entrega de forma independiente
+      // de la caída de audit — "latest" sin un filtro por tipo generaría una condición de carrera.
       const pendingRow = await waitUntil<OutboxEventRow>(
         async () => {
           const row = await findLatestOutboxEventForOrder(
@@ -155,8 +165,8 @@ const dockerAvailable = isDockerComposeAvailable();
       );
       expect(pendingRow.status).toBe('pending');
 
-      // 5. audit really is down — the request must fail at the transport
-      // level (connection refused), never resolve with an HTTP status.
+      // 5. audit realmente está caído — la solicitud debe fallar a nivel de
+      // transporte (conexión rechazada), nunca resolver con un status HTTP.
       let downError: unknown;
       try {
         await auditApi.get(`/audit/${orderId}`);
@@ -165,10 +175,10 @@ const dockerAvailable = isDockerComposeAvailable();
       }
       expect(downError).toBeInstanceOf(Error);
 
-      // 6. Bring audit back up.
+      // 6. Volver a levantar audit.
       startService('audit');
 
-      // 7. Poll until the poller delivers: audit endpoint responds again.
+      // 7. Hacer polling hasta que el poller entregue: el endpoint de audit vuelve a responder.
       await waitUntil<boolean>(
         async () => {
           const res = await auditApi.get(`/audit/${orderId}`).catch(() => null);
@@ -180,10 +190,10 @@ const dockerAvailable = isDockerComposeAvailable();
         },
       );
 
-      // 8. Poll outbox_events until the poller marks it sent. Same
-      // `order.status_changed` pin as step 4 — otherwise this can grab the
-      // sibling `inventory.commit_requested` row, which reaches `sent` on
-      // its own schedule and never matches the audit log's eventId below.
+      // 8. Hacer polling sobre outbox_events hasta que el poller lo marque como sent. Mismo
+      // fijado a `order.status_changed` que en el paso 4 — de lo contrario esto podría tomar
+      // la fila hermana `inventory.commit_requested`, que llega a `sent` según
+      // su propio cronograma y nunca coincidirá con el eventId del log de audit de abajo.
       const sentRow = await waitUntil<OutboxEventRow>(
         async () => {
           const row = await findLatestOutboxEventForOrder(
@@ -199,13 +209,17 @@ const dockerAvailable = isDockerComposeAvailable();
         },
       );
 
-      // 9. Exactly one audit log for this transition — delivery + dedup in
-      // one assertion. Total is 2: creation event + this CONFIRMED event.
+      // 9. Exactamente un log de audit para esta transición — entrega + dedup en
+      // una sola aserción. El total es 2: el evento de creación + este evento CONFIRMED.
+      // Filtrado a `order.status_changed`: CONFIRMED también dispara
+      // `inventory.commit_requested` → `inventory.committed`, un evento más
+      // en el mismo endpoint que este paso no está verificando.
       const logs = (await waitForAuditLogs(
         auditApi,
         orderId,
         2,
         30_000,
+        'order.status_changed',
       )) as Array<{ toStatus: string; eventId?: string }>;
 
       const confirmedLogs = logs.filter((log) => log.toStatus === 'CONFIRMED');

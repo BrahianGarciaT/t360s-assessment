@@ -14,6 +14,7 @@ const ordersApi: AxiosInstance = axios.create({
 
 const auditApi: AxiosInstance = axios.create({
   baseURL: AUDIT_URL,
+  headers: { 'x-api-key': API_KEY },
   validateStatus: () => true,
 });
 
@@ -40,9 +41,9 @@ describe('Order flow (e2e)', () => {
   let orderId: string;
 
   beforeAll(async () => {
-    // Gate: POST /orders now reserves stock synchronously against `inventory`
-    // before creating the order (409/503 otherwise). Seed enough stock for
-    // every item this suite's ORDER_PAYLOAD requests.
+    // Gate: POST /orders ahora reserva stock de forma síncrona contra `inventory`
+    // antes de crear la orden (409/503 en caso contrario). Sembrar stock suficiente
+    // para cada ítem que el ORDER_PAYLOAD de esta suite solicita.
     const res = await inventoryApi.put('/stock/prod-e2e-01', {
       quantity: 1000,
     });
@@ -121,26 +122,38 @@ describe('Order flow (e2e)', () => {
   });
 
   it('GET /audit/:orderId — recorded all status changes', async () => {
-    // Delivery latency now depends on the outbox poller's interval
-    // (`OUTBOX_POLL_INTERVAL_MS`, default 2s) instead of being near-immediate,
-    // so a fixed sleep would be either flaky or wastefully slow — poll instead.
-    await waitForAuditLogs(auditApi, orderId, 3, 20_000);
+    // La latencia de entrega ahora depende del intervalo del poller del outbox
+    // (`OUTBOX_POLL_INTERVAL_MS`, 2s por defecto) en lugar de ser casi inmediata,
+    // por lo que un sleep fijo sería inestable o innecesariamente lento — mejor hacer polling.
+    // Filtrado a `order.status_changed`: el create y el CONFIRMED de esta orden
+    // también generan `inventory.reserved`/`inventory.committed` en la misma
+    // `orderId`, y este test solo verifica el lifecycle de la orden.
+    await waitForAuditLogs(
+      auditApi,
+      orderId,
+      3,
+      20_000,
+      'order.status_changed',
+    );
 
     const res = await auditApi.get(`/audit/${orderId}`);
-
     expect(res.status).toBe(200);
-    expect(res.data).toHaveLength(3);
 
-    expect(res.data[0].fromStatus).toBeNull();
-    expect(res.data[0].toStatus).toBe('PENDING');
+    const orderLogs = res.data.filter(
+      (log: { eventType: string }) => log.eventType === 'order.status_changed',
+    );
+    expect(orderLogs).toHaveLength(3);
 
-    expect(res.data[1].fromStatus).toBe('PENDING');
-    expect(res.data[1].toStatus).toBe('CONFIRMED');
+    expect(orderLogs[0].fromStatus).toBeNull();
+    expect(orderLogs[0].toStatus).toBe('PENDING');
 
-    expect(res.data[2].fromStatus).toBe('CONFIRMED');
-    expect(res.data[2].toStatus).toBe('SHIPPED');
+    expect(orderLogs[1].fromStatus).toBe('PENDING');
+    expect(orderLogs[1].toStatus).toBe('CONFIRMED');
 
-    const timestamps: number[] = res.data.map((log: { timestamp: string }) =>
+    expect(orderLogs[2].fromStatus).toBe('CONFIRMED');
+    expect(orderLogs[2].toStatus).toBe('SHIPPED');
+
+    const timestamps: number[] = orderLogs.map((log: { timestamp: string }) =>
       new Date(log.timestamp).getTime(),
     );
     expect(timestamps[0]).toBeLessThanOrEqual(timestamps[1]);
