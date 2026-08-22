@@ -191,32 +191,65 @@ describe('InventoryRepository', () => {
   });
 
   describe('finalize', () => {
-    it('commits a held reservation: decrements quantity and reserved for every item', async () => {
+    it('commits a held reservation: decrements quantity and reserved for every item, and records the processed eventId', async () => {
       const reservation = buildReservation();
       reservationManagerRepo.findOne.mockResolvedValue(reservation);
       reservationManagerRepo.save.mockImplementation((v) => v);
 
-      const result = await repository.finalize('order-1', 'commit');
+      const result = await repository.finalize(
+        'order-1',
+        'commit',
+        'event-abc',
+      );
 
       expect(manager.query).toHaveBeenCalledWith(
         expect.stringContaining('quantity = quantity -'),
         [2, 'p1'],
       );
       expect(reservationManagerRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ status: ReservationStatus.COMMITTED }),
+        expect.objectContaining({
+          status: ReservationStatus.COMMITTED,
+          processedEventId: 'event-abc',
+        }),
       );
       expect(result).toEqual(
-        expect.objectContaining({ status: ReservationStatus.COMMITTED }),
+        expect.objectContaining({
+          status: ReservationStatus.COMMITTED,
+          processedEventId: 'event-abc',
+        }),
       );
     });
 
-    it('is idempotent: returns the reservation as-is without re-applying stock changes when already terminal', async () => {
+    it('is idempotent by eventId: a redelivered event with the SAME eventId already recorded on this reservation is a no-op, no stock re-applied (triangulation)', async () => {
       const reservation = buildReservation({
         status: ReservationStatus.COMMITTED,
+        processedEventId: 'event-abc',
       });
       reservationManagerRepo.findOne.mockResolvedValue(reservation);
 
-      const result = await repository.finalize('order-1', 'commit');
+      const result = await repository.finalize(
+        'order-1',
+        'commit',
+        'event-abc',
+      );
+
+      expect(manager.query).not.toHaveBeenCalled();
+      expect(reservationManagerRepo.save).not.toHaveBeenCalled();
+      expect(result).toBe(reservation);
+    });
+
+    it('falls back to the terminal-state guard (still a safe no-op) when the reservation is already terminal under a DIFFERENT eventId', async () => {
+      const reservation = buildReservation({
+        status: ReservationStatus.COMMITTED,
+        processedEventId: 'event-original',
+      });
+      reservationManagerRepo.findOne.mockResolvedValue(reservation);
+
+      const result = await repository.finalize(
+        'order-1',
+        'commit',
+        'event-different',
+      );
 
       expect(manager.query).not.toHaveBeenCalled();
       expect(reservationManagerRepo.save).not.toHaveBeenCalled();
@@ -226,7 +259,11 @@ describe('InventoryRepository', () => {
     it('returns null when no reservation exists for the orderId (unknown reservation)', async () => {
       reservationManagerRepo.findOne.mockResolvedValue(null);
 
-      const result = await repository.finalize('missing-order', 'release');
+      const result = await repository.finalize(
+        'missing-order',
+        'release',
+        'event-xyz',
+      );
 
       expect(result).toBeNull();
     });

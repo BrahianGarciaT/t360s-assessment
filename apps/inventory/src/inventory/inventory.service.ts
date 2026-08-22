@@ -70,15 +70,24 @@ export class InventoryService {
   }
 
   /**
-   * Terminal-state guard lives in the repository: an unknown or already
+   * Dedup is keyed by `eventId` (mirrors `AuditService.createLog`'s
+   * dedup-by-eventId pattern), with the repository's terminal-state guard
+   * as a defensive fallback: an unknown, already-processed, or already
    * terminal reservation still acks `{ ok: true }` here — `orders` is
    * HTTP-only and has no callback channel to react to a late failure.
    */
-  async commit(orderId: string): Promise<{ ok: true; orderId: string }> {
-    const reservation = await this.repository.finalize(orderId, 'commit');
+  async commit(
+    orderId: string,
+    eventId: string,
+  ): Promise<{ ok: true; orderId: string }> {
+    const reservation = await this.repository.finalize(
+      orderId,
+      'commit',
+      eventId,
+    );
     if (!reservation) {
       this.logger.warn(
-        { orderId },
+        { orderId, eventId },
         'No reservation found for orderId — ignoring commit (no-op ack)',
       );
     }
@@ -87,16 +96,18 @@ export class InventoryService {
 
   async release(
     orderId: string,
+    eventId: string,
     reason: ReleasedReason,
   ): Promise<{ ok: true; orderId: string }> {
     const reservation = await this.repository.finalize(
       orderId,
       'release',
+      eventId,
       reason,
     );
     if (!reservation) {
       this.logger.warn(
-        { orderId },
+        { orderId, eventId },
         'No reservation found for orderId — ignoring release (no-op ack)',
       );
     }

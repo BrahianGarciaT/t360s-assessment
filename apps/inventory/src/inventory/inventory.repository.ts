@@ -102,13 +102,19 @@ export class InventoryRepository {
   }
 
   /**
-   * Terminal-state guard: an already committed/released reservation is
-   * returned unchanged (idempotent no-op) instead of re-applying stock
-   * changes — protects against redelivered finalize/release events.
+   * Idempotent by `eventId`, mirroring `AuditService.createLog`'s
+   * dedup-by-eventId pattern: a redelivered finalize/release event carrying
+   * the SAME `eventId` already recorded on this reservation (`processedEventId`)
+   * is a no-op — this is the primary dedup key, checked before touching stock.
+   * A terminal-state guard remains as a defensive fallback for the (should
+   * never happen in normal operation) case of a DIFFERENT eventId arriving
+   * for an already-terminal reservation — still a safe no-op, never a
+   * double-apply, but distinguished in logging from a true eventId replay.
    */
   async finalize(
     orderId: string,
     action: FinalizeAction,
+    eventId: string,
     releasedReason?: ReleasedReason,
   ): Promise<Reservation | null> {
     return this.dataSource.transaction(async (manager) => {
@@ -119,6 +125,10 @@ export class InventoryRepository {
 
       if (!reservation) {
         return null;
+      }
+
+      if (reservation.processedEventId === eventId) {
+        return reservation;
       }
 
       if (reservation.status !== ReservationStatus.HELD) {
@@ -147,6 +157,7 @@ export class InventoryRepository {
         action === 'commit'
           ? ReservationStatus.COMMITTED
           : ReservationStatus.RELEASED;
+      reservation.processedEventId = eventId;
       if (action === 'release') {
         reservation.releasedReason = releasedReason ?? null;
       }
