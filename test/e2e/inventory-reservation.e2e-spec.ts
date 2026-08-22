@@ -305,5 +305,66 @@ const dockerAvailable = isDockerComposeAvailable();
       );
       expect(secondCreateRes.status).toBe(201);
     }, 120_000);
+
+    it('never oversells under truly concurrent reservations against the same SKU', async () => {
+      // Design's own testing strategy (obs #210) calls for "N parallel
+      // reserves against real Postgres; assert reserved <= quantity" as an
+      // Integration-level proof. This repo has no lighter-weight
+      // DB-integration harness that talks to inventory's real Postgres
+      // instance outside this e2e layer (unit specs mock `manager.query()`
+      // entirely — sequential mock calls cannot prove concurrent-request
+      // safety), so this fires truly concurrent HTTP requests at the real
+      // running stack (orders -> TCP -> inventory -> real conditional
+      // UPDATE against real Postgres), which is the only way to exercise
+      // genuine DB-level concurrency rather than sequential app-level calls.
+      const productId = 'prod-e2e-inv-concurrent';
+      const seedQuantity = 10;
+      const qtyPerOrder = 3;
+      const concurrentOrderCount = 5; // 5 * 3 = 15 requested vs 10 available
+
+      const seedRes = await inventoryApi.put(`/stock/${productId}`, {
+        quantity: seedQuantity,
+      });
+      expect(seedRes.status).toBe(200);
+
+      const userIds = Array.from(
+        { length: concurrentOrderCount },
+        (_, i) => `user-e2e-inv-concurrent-${i}`,
+      );
+
+      // Promise.all fires every POST /orders in parallel — no await between
+      // requests — so all five reservation attempts race each other inside
+      // inventory's real Postgres transaction, not one-at-a-time.
+      const results = await Promise.all(
+        userIds.map((userId) =>
+          ordersApi.post(
+            '/orders',
+            buildOrderPayload(userId, productId, qtyPerOrder),
+          ),
+        ),
+      );
+
+      const succeeded = results.filter((res) => res.status === 201);
+      const rejected = results.filter((res) => res.status === 409);
+
+      // Exactly floor(10/3) = 3 orders fit; the deterministic COUNT proves
+      // no double-acceptance happened under real concurrency, regardless of
+      // which 3 of the 5 concurrent requests actually won the row lock.
+      const expectedSuccessCount = Math.floor(seedQuantity / qtyPerOrder);
+      expect(succeeded.length).toBe(expectedSuccessCount);
+      expect(rejected.length).toBe(concurrentOrderCount - expectedSuccessCount);
+      rejected.forEach((res) => {
+        expect(res.data.reason).toBe('INSUFFICIENT_STOCK');
+      });
+
+      const finalStock = (
+        await inventoryApi.get<StockLevel>(`/stock/${productId}`)
+      ).data;
+      // The core "no oversell" guarantee: total reserved quantity never
+      // exceeds available stock, proven against real concurrent writers.
+      expect(finalStock.reserved).toBeLessThanOrEqual(finalStock.quantity);
+      expect(finalStock.reserved).toBe(succeeded.length * qtyPerOrder);
+      expect(finalStock.quantity).toBe(seedQuantity);
+    }, 30_000);
   },
 );
