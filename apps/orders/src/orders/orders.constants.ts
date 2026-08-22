@@ -3,10 +3,14 @@ export const INVENTORY_TCP_CLIENT = 'INVENTORY_TCP_CLIENT';
 
 export interface InventoryClientConfig {
   sendTimeoutMs: number;
+  breakerFailureThreshold: number;
+  breakerResetTimeoutMs: number;
 }
 
 const DEFAULT_INVENTORY_CLIENT_CONFIG: InventoryClientConfig = {
   sendTimeoutMs: 3000,
+  breakerFailureThreshold: 5,
+  breakerResetTimeoutMs: 15000,
 };
 
 function parseIntEnv(value: string | undefined, fallback: number): number {
@@ -33,6 +37,14 @@ export function getInventoryClientConfig(
     sendTimeoutMs: parseIntEnv(
       env.INVENTORY_SEND_TIMEOUT_MS,
       DEFAULT_INVENTORY_CLIENT_CONFIG.sendTimeoutMs,
+    ),
+    breakerFailureThreshold: parseIntEnv(
+      env.INVENTORY_BREAKER_FAILURE_THRESHOLD,
+      DEFAULT_INVENTORY_CLIENT_CONFIG.breakerFailureThreshold,
+    ),
+    breakerResetTimeoutMs: parseIntEnv(
+      env.INVENTORY_BREAKER_RESET_TIMEOUT_MS,
+      DEFAULT_INVENTORY_CLIENT_CONFIG.breakerResetTimeoutMs,
     ),
   };
 }
