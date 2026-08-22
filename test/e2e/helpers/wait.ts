@@ -118,27 +118,42 @@ export async function withTransientRetry<T>(
 }
 
 /**
- * Hace polling de `GET /audit/:orderId` hasta que devuelve exactamente `expectedCount`
- * registros (200 con un array de longitud coincidente). Tolera que `audit` esté
- * temporalmente inalcanzable (ECONNREFUSED / no-200) entre intentos.
+ * Hace polling de `GET /audit/:orderId` hasta que devuelve exactamente
+ * `expectedCount` registros (200 con un array de longitud coincidente) — o,
+ * si se pasa `eventType`, exactamente `expectedCount` registros cuyo
+ * `eventType` coincida. El filtro importa porque audit ahora mezcla
+ * `order.status_changed` con entradas `inventory.reserved`/`committed`/
+ * `released` para el mismo `orderId`: quien espera la llegada de un solo
+ * tipo de evento, sin el filtro, terminaría esperando un conteo TOTAL que
+ * un tipo de evento hermano puede desbalancear y que nunca se estabiliza.
+ * Tolera que `audit` esté temporalmente inalcanzable (ECONNREFUSED / no-200)
+ * entre intentos.
  */
 export async function waitForAuditLogs(
   auditApi: AxiosInstance,
   orderId: string,
   expectedCount: number,
   timeoutMs: number,
+  eventType?: string,
 ): Promise<unknown[]> {
   return waitUntil(
     async () => {
       const res = await auditApi.get(`/audit/${orderId}`);
-      if (res.status === 200 && Array.isArray(res.data)) {
-        return res.data.length === expectedCount ? res.data : false;
+      if (res.status !== 200 || !Array.isArray(res.data)) {
+        return false;
       }
-      return false;
+      const matching: unknown[] = eventType
+        ? res.data.filter(
+            (entry: { eventType?: string }) => entry.eventType === eventType,
+          )
+        : res.data;
+      return matching.length === expectedCount ? matching : false;
     },
     {
       timeoutMs,
-      description: `GET /audit/${orderId} to return ${expectedCount} record(s)`,
+      description: eventType
+        ? `GET /audit/${orderId} to return ${expectedCount} ${eventType} record(s)`
+        : `GET /audit/${orderId} to return ${expectedCount} record(s)`,
     },
   );
 }

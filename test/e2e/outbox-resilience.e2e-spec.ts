@@ -55,6 +55,7 @@ const dockerAvailable = isDockerComposeAvailable();
       });
       auditApi = axios.create({
         baseURL: AUDIT_URL,
+        headers: { 'x-api-key': API_KEY },
         validateStatus: () => true,
         timeout: 8000,
       });
@@ -104,7 +105,16 @@ const dockerAvailable = isDockerComposeAvailable();
       expect(createRes.status).toBe(201);
       const orderId: string = createRes.data.id;
 
-      await waitForAuditLogs(auditApi, orderId, 1, 20_000);
+      // Filtrado a `order.status_changed`: crear la orden también dispara
+      // `inventory.reserved` para la misma `orderId` (evento separado, en el
+      // mismo endpoint) — este paso solo espera el evento de creación de la orden.
+      await waitForAuditLogs(
+        auditApi,
+        orderId,
+        1,
+        20_000,
+        'order.status_changed',
+      );
 
       // 2. Derribar audit.
       stopService('audit');
@@ -201,11 +211,15 @@ const dockerAvailable = isDockerComposeAvailable();
 
       // 9. Exactamente un log de audit para esta transición — entrega + dedup en
       // una sola aserción. El total es 2: el evento de creación + este evento CONFIRMED.
+      // Filtrado a `order.status_changed`: CONFIRMED también dispara
+      // `inventory.commit_requested` → `inventory.committed`, un evento más
+      // en el mismo endpoint que este paso no está verificando.
       const logs = (await waitForAuditLogs(
         auditApi,
         orderId,
         2,
         30_000,
+        'order.status_changed',
       )) as Array<{ toStatus: string; eventId?: string }>;
 
       const confirmedLogs = logs.filter((log) => log.toStatus === 'CONFIRMED');
