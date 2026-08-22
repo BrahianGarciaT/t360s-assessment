@@ -135,9 +135,17 @@ const dockerAvailable = isDockerComposeAvailable();
       expect(elapsedMs).toBeLessThan(2000);
 
       // 4. The outbox event for this transition is pending in Postgres.
+      // Pinned to `order.status_changed`: CONFIRMED now also fans out an
+      // `inventory.commit_requested` row in the same transaction, and
+      // inventory (never taken down in this suite) delivers independently
+      // of audit's outage — "latest" without a type filter would race.
       const pendingRow = await waitUntil<OutboxEventRow>(
         async () => {
-          const row = await findLatestOutboxEventForOrder(dbClient, orderId);
+          const row = await findLatestOutboxEventForOrder(
+            dbClient,
+            orderId,
+            'order.status_changed',
+          );
           return row && row.status === 'pending' ? row : false;
         },
         {
@@ -172,10 +180,17 @@ const dockerAvailable = isDockerComposeAvailable();
         },
       );
 
-      // 8. Poll outbox_events until the poller marks it sent.
+      // 8. Poll outbox_events until the poller marks it sent. Same
+      // `order.status_changed` pin as step 4 — otherwise this can grab the
+      // sibling `inventory.commit_requested` row, which reaches `sent` on
+      // its own schedule and never matches the audit log's eventId below.
       const sentRow = await waitUntil<OutboxEventRow>(
         async () => {
-          const row = await findLatestOutboxEventForOrder(dbClient, orderId);
+          const row = await findLatestOutboxEventForOrder(
+            dbClient,
+            orderId,
+            'order.status_changed',
+          );
           return row && row.status === 'sent' ? row : false;
         },
         {
