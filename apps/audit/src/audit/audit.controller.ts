@@ -1,8 +1,12 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { ORDER_EVENTS, OrderStatusChangedEvent } from '@app/shared';
+import {
+  ApiKeyGuard,
+  ORDER_EVENTS,
+  OrderStatusChangedEvent,
+} from '@app/shared';
 import { AuditService } from './audit.service';
 
 @ApiTags('audit')
@@ -45,6 +49,8 @@ export class AuditController {
   }
 
   @Get(':orderId')
+  @UseGuards(ApiKeyGuard)
+  @ApiSecurity('x-api-key')
   @ApiOperation({ summary: 'Obtiene el historial de auditoría de una orden' })
   @ApiParam({ name: 'orderId', description: 'UUID de la orden' })
   findByOrderId(@Param('orderId') orderId: string) {
