@@ -164,62 +164,68 @@ export class OrdersService {
     dto: UpdateStatusDto,
     correlationId?: string,
   ): Promise<Order> {
-    const order = await this.ordersRepository.findById(id);
+    const updated = await this.ordersRepository.transitionStatus(
+      id,
+      (order) => {
+        const allowed = VALID_TRANSITIONS[order.status];
+        if (!allowed.includes(dto.status)) {
+          throw new BadRequestException(
+            `Cannot transition from ${order.status} to ${dto.status}`,
+          );
+        }
 
-    if (!order) {
+        const fromStatus = order.status;
+        order.status = dto.status;
+
+        const buildEvents: OutboxEventFactory = (saved) => {
+          const metadata = correlationId ? { correlationId } : undefined;
+          const events: OutboxEventInput[] = [
+            {
+              eventType: ORDER_EVENTS.STATUS_CHANGED,
+              payload: {
+                orderId: saved.id,
+                fromStatus,
+                toStatus: saved.status,
+                timestamp: new Date(),
+                metadata,
+              },
+            },
+          ];
+
+          // Same-transaction finalize/release fan-out (design decision #7):
+          // the order status change and the inventory event are
+          // all-or-nothing.
+          if (saved.status === OrderStatus.CONFIRMED) {
+            events.push({
+              eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,
+              payload: {
+                orderId: saved.id,
+                timestamp: new Date(),
+                metadata,
+              },
+            });
+          } else if (saved.status === OrderStatus.CANCELLED) {
+            events.push({
+              eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
+              payload: {
+                orderId: saved.id,
+                timestamp: new Date(),
+                metadata,
+              },
+            });
+          }
+
+          return events;
+        };
+
+        return buildEvents;
+      },
+    );
+
+    if (!updated) {
       throw new NotFoundException(`Order ${id} not found`);
     }
 
-    const allowed = VALID_TRANSITIONS[order.status];
-    if (!allowed.includes(dto.status)) {
-      throw new BadRequestException(
-        `Cannot transition from ${order.status} to ${dto.status}`,
-      );
-    }
-
-    const fromStatus = order.status;
-    order.status = dto.status;
-
-    const buildEvents: OutboxEventFactory = (saved) => {
-      const metadata = correlationId ? { correlationId } : undefined;
-      const events: OutboxEventInput[] = [
-        {
-          eventType: ORDER_EVENTS.STATUS_CHANGED,
-          payload: {
-            orderId: saved.id,
-            fromStatus,
-            toStatus: saved.status,
-            timestamp: new Date(),
-            metadata,
-          },
-        },
-      ];
-
-      // Same-transaction finalize/release fan-out (design decision #7): the
-      // order status change and the inventory event are all-or-nothing.
-      if (saved.status === OrderStatus.CONFIRMED) {
-        events.push({
-          eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,
-          payload: {
-            orderId: saved.id,
-            timestamp: new Date(),
-            metadata,
-          },
-        });
-      } else if (saved.status === OrderStatus.CANCELLED) {
-        events.push({
-          eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
-          payload: {
-            orderId: saved.id,
-            timestamp: new Date(),
-            metadata,
-          },
-        });
-      }
-
-      return events;
-    };
-
-    return this.ordersRepository.save(order, buildEvents);
+    return updated;
   }
 }

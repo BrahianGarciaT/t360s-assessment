@@ -10,7 +10,7 @@ describe('OrdersRepository', () => {
   let dataSource: { transaction: jest.Mock };
   let outboxRepository: jest.Mocked<Pick<OutboxRepository, 'insertWithin'>>;
   let manager: { getRepository: jest.Mock; query: jest.Mock };
-  let orderManagerRepo: { create: jest.Mock; save: jest.Mock };
+  let orderManagerRepo: { create: jest.Mock; save: jest.Mock; findOne: jest.Mock };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
@@ -27,7 +27,7 @@ describe('OrdersRepository', () => {
     }) as Order;
 
   beforeEach(() => {
-    orderManagerRepo = { create: jest.fn(), save: jest.fn() };
+    orderManagerRepo = { create: jest.fn(), save: jest.fn(), findOne: jest.fn() };
     manager = {
       getRepository: jest.fn().mockReturnValue(orderManagerRepo),
       query: jest.fn().mockResolvedValue(undefined),
@@ -127,23 +127,30 @@ describe('OrdersRepository', () => {
     });
   });
 
-  describe('save', () => {
-    it('persists the updated order, refreshes the search vector, and inserts the outbox event within one transaction', async () => {
+  describe('transitionStatus', () => {
+    it('reads the order with a pessimistic write lock, persists the transition, refreshes the search vector, and inserts the outbox event within one transaction', async () => {
       const order = buildOrder({ status: OrderStatus.CONFIRMED });
+      orderManagerRepo.findOne.mockResolvedValue(order);
       orderManagerRepo.save.mockResolvedValue(order);
       outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
-      const eventFactory = jest
+      const buildEvents = jest
         .fn()
         .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
+      const transition = jest.fn().mockReturnValue(buildEvents);
 
-      const result = await repository.save(order, eventFactory);
+      const result = await repository.transitionStatus(order.id, transition);
 
+      expect(orderManagerRepo.findOne).toHaveBeenCalledWith({
+        where: { id: order.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      expect(transition).toHaveBeenCalledWith(order);
       expect(orderManagerRepo.save).toHaveBeenCalledWith(order);
       expect(manager.query).toHaveBeenCalledWith(
         expect.stringContaining('UPDATE orders'),
         [order.id],
       );
-      expect(eventFactory).toHaveBeenCalledWith(order);
+      expect(buildEvents).toHaveBeenCalledWith(order);
       expect(outboxRepository.insertWithin).toHaveBeenCalledTimes(1);
       expect(outboxRepository.insertWithin).toHaveBeenCalledWith(manager, {
         eventType: 'order.status_changed',
@@ -154,14 +161,16 @@ describe('OrdersRepository', () => {
 
     it('inserts both the order.status_changed and the inventory finalize event on a CONFIRMED transition (triangulation)', async () => {
       const order = buildOrder({ status: OrderStatus.CONFIRMED });
+      orderManagerRepo.findOne.mockResolvedValue(order);
       orderManagerRepo.save.mockResolvedValue(order);
       outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
-      const eventFactory = jest.fn().mockReturnValue([
+      const buildEvents = jest.fn().mockReturnValue([
         { eventType: 'order.status_changed', payload: {} },
         { eventType: 'inventory.commit_requested', payload: {} },
       ]);
+      const transition = jest.fn().mockReturnValue(buildEvents);
 
-      await repository.save(order, eventFactory);
+      await repository.transitionStatus(order.id, transition);
 
       expect(outboxRepository.insertWithin).toHaveBeenCalledTimes(2);
       expect(outboxRepository.insertWithin).toHaveBeenNthCalledWith(
@@ -173,17 +182,49 @@ describe('OrdersRepository', () => {
 
     it('rolls back the whole transaction when the outbox insert fails on a status update (triangulation)', async () => {
       const order = buildOrder({ status: OrderStatus.SHIPPED });
+      orderManagerRepo.findOne.mockResolvedValue(order);
       orderManagerRepo.save.mockResolvedValue(order);
       outboxRepository.insertWithin.mockRejectedValue(
         new Error('outbox insert failed'),
       );
-      const eventFactory = jest
+      const buildEvents = jest
         .fn()
         .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
+      const transition = jest.fn().mockReturnValue(buildEvents);
 
-      await expect(repository.save(order, eventFactory)).rejects.toThrow(
-        'outbox insert failed',
+      await expect(
+        repository.transitionStatus(order.id, transition),
+      ).rejects.toThrow('outbox insert failed');
+    });
+
+    it('returns null without saving, refreshing the search vector, inserting events, or invoking the transition callback when the locked row does not exist', async () => {
+      orderManagerRepo.findOne.mockResolvedValue(null);
+      const transition = jest.fn();
+
+      const result = await repository.transitionStatus(
+        'missing-id',
+        transition,
       );
+
+      expect(result).toBeNull();
+      expect(transition).not.toHaveBeenCalled();
+      expect(orderManagerRepo.save).not.toHaveBeenCalled();
+      expect(manager.query).not.toHaveBeenCalled();
+      expect(outboxRepository.insertWithin).not.toHaveBeenCalled();
+    });
+
+    it('propagates the error and never saves when the transition callback throws (e.g. an invalid FSM transition)', async () => {
+      const order = buildOrder({ status: OrderStatus.DELIVERED });
+      orderManagerRepo.findOne.mockResolvedValue(order);
+      const transition = jest.fn().mockImplementation(() => {
+        throw new Error('Cannot transition from DELIVERED to PENDING');
+      });
+
+      await expect(
+        repository.transitionStatus(order.id, transition),
+      ).rejects.toThrow('Cannot transition from DELIVERED to PENDING');
+      expect(orderManagerRepo.save).not.toHaveBeenCalled();
+      expect(outboxRepository.insertWithin).not.toHaveBeenCalled();
     });
   });
 });

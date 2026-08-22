@@ -31,7 +31,7 @@ describe('OrdersService', () => {
   let repository: jest.Mocked<
     Pick<
       OrdersRepository,
-      'create' | 'findAll' | 'searchByText' | 'findById' | 'save'
+      'create' | 'findAll' | 'searchByText' | 'findById' | 'transitionStatus'
     >
   >;
   let inventoryClient: { send: jest.Mock };
@@ -58,7 +58,7 @@ describe('OrdersService', () => {
       findAll: jest.fn(),
       searchByText: jest.fn(),
       findById: jest.fn(),
-      save: jest.fn(),
+      transitionStatus: jest.fn(),
     };
     inventoryClient = { send: jest.fn() };
     (randomUUID as jest.Mock).mockReturnValue(GENERATED_ID);
@@ -252,21 +252,34 @@ describe('OrdersService', () => {
   });
 
   describe('updateStatus', () => {
+    // Mimics the real OrdersRepository#transitionStatus contract: reads the
+    // order, invokes `transition` (which validates + mutates `order.status`
+    // in place and returns the event factory), and resolves the mutated
+    // order — capturing the event factory into `buildEvents` so tests can
+    // assert on the events it produces.
+    const mockTransitionStatus = (
+      order: Order,
+    ): { buildEvents: () => OutboxEventFactory } => {
+      let buildEvents: OutboxEventFactory;
+      repository.transitionStatus.mockImplementation(
+        async (_id, transition) => {
+          buildEvents = transition(order);
+          return order;
+        },
+      );
+      return { buildEvents: () => buildEvents };
+    };
+
     it('updates status and hands the repository an event array with order.status_changed and inventory.commit_requested on CONFIRMED', async () => {
       const order = buildOrder({ status: OrderStatus.PENDING });
-      repository.findById.mockResolvedValue(order);
-      repository.save.mockImplementation(async (o: Order) => o);
+      const captured = mockTransitionStatus(order);
 
       const result = await service.updateStatus(order.id, {
         status: OrderStatus.CONFIRMED,
       });
 
       expect(result.status).toBe(OrderStatus.CONFIRMED);
-      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
-        Order,
-        OutboxEventFactory,
-      ];
-      const events = eventFactory(savedOrder);
+      const events = captured.buildEvents()(order);
       expect(events).toHaveLength(2);
       expect(events[0]).toEqual({
         eventType: ORDER_EVENTS.STATUS_CHANGED,
@@ -284,16 +297,11 @@ describe('OrdersService', () => {
 
     it('emits inventory.release_requested on CANCELLED (triangulation)', async () => {
       const order = buildOrder({ status: OrderStatus.PENDING });
-      repository.findById.mockResolvedValue(order);
-      repository.save.mockImplementation(async (o: Order) => o);
+      const captured = mockTransitionStatus(order);
 
       await service.updateStatus(order.id, { status: OrderStatus.CANCELLED });
 
-      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
-        Order,
-        OutboxEventFactory,
-      ];
-      const events = eventFactory(savedOrder);
+      const events = captured.buildEvents()(order);
       expect(events).toHaveLength(2);
       expect(events[1]).toEqual({
         eventType: INVENTORY_EVENTS.RELEASE_REQUESTED,
@@ -303,24 +311,18 @@ describe('OrdersService', () => {
 
     it('emits only order.status_changed on a transition that does not touch inventory (SHIPPED)', async () => {
       const order = buildOrder({ status: OrderStatus.CONFIRMED });
-      repository.findById.mockResolvedValue(order);
-      repository.save.mockImplementation(async (o: Order) => o);
+      const captured = mockTransitionStatus(order);
 
       await service.updateStatus(order.id, { status: OrderStatus.SHIPPED });
 
-      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
-        Order,
-        OutboxEventFactory,
-      ];
-      const events = eventFactory(savedOrder);
+      const events = captured.buildEvents()(order);
       expect(events).toHaveLength(1);
       expect(events[0].eventType).toBe(ORDER_EVENTS.STATUS_CHANGED);
     });
 
     it('attaches the correlation id as metadata on both events when provided', async () => {
       const order = buildOrder({ status: OrderStatus.PENDING });
-      repository.findById.mockResolvedValue(order);
-      repository.save.mockImplementation(async (o: Order) => o);
+      const captured = mockTransitionStatus(order);
 
       await service.updateStatus(
         order.id,
@@ -328,32 +330,27 @@ describe('OrdersService', () => {
         'corr-456',
       );
 
-      const [savedOrder, eventFactory] = repository.save.mock.calls[0] as [
-        Order,
-        OutboxEventFactory,
-      ];
-      const events = eventFactory(savedOrder);
+      const events = captured.buildEvents()(order);
       expect(events[0].payload.metadata).toEqual({ correlationId: 'corr-456' });
       expect(events[1].payload.metadata).toEqual({ correlationId: 'corr-456' });
     });
 
     it('throws BadRequestException on an invalid transition (DELIVERED -> PENDING)', async () => {
       const order = buildOrder({ status: OrderStatus.DELIVERED });
-      repository.findById.mockResolvedValue(order);
+      mockTransitionStatus(order);
 
       await expect(
         service.updateStatus(order.id, { status: OrderStatus.PENDING }),
       ).rejects.toThrow(BadRequestException);
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(order.status).toBe(OrderStatus.DELIVERED);
     });
 
     it('throws NotFoundException when the order does not exist', async () => {
-      repository.findById.mockResolvedValue(null);
+      repository.transitionStatus.mockResolvedValue(null);
 
       await expect(
         service.updateStatus('missing-id', { status: OrderStatus.CONFIRMED }),
       ).rejects.toThrow(NotFoundException);
-      expect(repository.save).not.toHaveBeenCalled();
     });
   });
 
