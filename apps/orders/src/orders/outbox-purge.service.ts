@@ -7,9 +7,10 @@ import { getOutboxConfig, OutboxConfig } from './outbox.constants';
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
- * Closes the documented gap left by the outbox design: `outbox_events` grows
- * forever otherwise. Daily sweep of `sent` rows past the retention window —
- * `pending`/`failed` rows are never touched, they stay for inspection.
+ * Cierra el gap documentado que deja el diseño del outbox: de lo contrario,
+ * `outbox_events` crece para siempre. Barrido diario de las filas `sent` que
+ * superan la ventana de retención — las filas `pending`/`failed` nunca se
+ * tocan, quedan disponibles para inspección.
  */
 @Injectable()
 export class OutboxPurgeService {

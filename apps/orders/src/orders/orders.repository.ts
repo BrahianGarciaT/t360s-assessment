@@ -23,9 +23,10 @@ export class OrdersRepository implements OnModuleInit {
   }
 
   /**
-   * Creates the order, refreshes its search vector, and inserts every outbox
-   * event returned by the factory in ONE transaction. If any outbox insert
-   * fails, everything rolls back — the order is never persisted.
+   * Crea la orden, refresca su vector de búsqueda, e inserta cada evento de
+   * outbox devuelto por el factory en UNA sola transacción. Si falla
+   * cualquier inserción en el outbox, todo se revierte — la orden nunca se
+   * persiste.
    */
   async create(
     data: Partial<Order>,
@@ -65,16 +66,18 @@ export class OrdersRepository implements OnModuleInit {
   }
 
   /**
-   * Reads the order with a `SELECT ... FOR UPDATE` (pessimistic write lock),
-   * lets `transition` validate and mutate it in place, persists the result,
-   * refreshes its search vector, and inserts every outbox event returned by
-   * the transition's event factory — all in ONE transaction. The lock is
-   * what closes the lost-update race: a concurrent `transitionStatus` call
-   * on the same order blocks on the row lock until this transaction commits
-   * or rolls back, so it always observes the post-transition state, never
-   * stale data. `transition` may throw (e.g. an invalid FSM transition) —
-   * the error propagates and the transaction rolls back with no side
-   * effects, since nothing has been saved yet at that point.
+   * Lee la orden con un `SELECT ... FOR UPDATE` (bloqueo de escritura
+   * pesimista), deja que `transition` la valide y la mute in place, persiste
+   * el resultado, refresca su vector de búsqueda, e inserta cada evento de
+   * outbox devuelto por el factory de eventos de la transition — todo en UNA
+   * sola transacción. El lock es lo que cierra la carrera de lost-update:
+   * una llamada concurrente a `transitionStatus` sobre la misma orden se
+   * bloquea en el row lock hasta que esta transacción hace commit o
+   * rollback, por lo que siempre observa el estado posterior a la
+   * transición, nunca datos obsoletos. `transition` puede lanzar (por
+   * ejemplo, una transición de FSM inválida) — el error se propaga y la
+   * transacción hace rollback sin efectos secundarios, ya que en ese punto
+   * todavía no se había guardado nada.
    */
   async transitionStatus(
     id: string,

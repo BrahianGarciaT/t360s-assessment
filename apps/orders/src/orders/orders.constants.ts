@@ -19,11 +19,12 @@ function parseIntEnv(value: string | undefined, fallback: number): number {
 }
 
 /**
- * Builds the `INVENTORY_TCP_CLIENT` send-timeout configuration from
- * environment variables, falling back to the documented default when
- * missing or invalid. Clone of `getOutboxConfig()`'s `parseIntEnv` idiom
- * (`outbox.constants.ts`), tighter than `OUTBOX_SEND_TIMEOUT_MS` because
- * this call sits in the user-facing `POST /orders` request path.
+ * Construye la configuración de send-timeout de `INVENTORY_TCP_CLIENT` a
+ * partir de variables de entorno, recurriendo al valor por defecto
+ * documentado cuando falta o es inválido. Es un clon del idioma
+ * `parseIntEnv` de `getOutboxConfig()` (`outbox.constants.ts`), más ajustado
+ * que `OUTBOX_SEND_TIMEOUT_MS` porque esta llamada está en el path de
+ * request de cara al usuario `POST /orders`.
  */
 export function getInventoryClientConfig(
   env: NodeJS.ProcessEnv = process.env,
