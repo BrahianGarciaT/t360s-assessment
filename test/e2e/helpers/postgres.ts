@@ -7,11 +7,11 @@ export interface OutboxEventRow {
 }
 
 /**
- * Host-side connection: the e2e process runs outside the Docker network, so
- * it must reach Postgres via the mapped `localhost:5432` port from
- * `docker-compose.yml` — never `ORDERS_DB_HOST` (that resolves to the
- * `postgres` service name, only reachable from inside the compose network).
- * User/password/db default to the values already checked into `.env.example`.
+ * Conexión desde el lado del host: el proceso e2e corre fuera de la red de
+ * Docker, por lo que debe llegar a Postgres a través del puerto mapeado
+ * `localhost:5432` de `docker-compose.yml` — nunca `ORDERS_DB_HOST` (eso resuelve
+ * al nombre del servicio `postgres`, solo accesible desde dentro de la red de compose).
+ * Usuario/contraseña/db por defecto usan los valores ya versionados en `.env.example`.
  */
 function resolveConnectionConfig() {
   return {
@@ -28,15 +28,15 @@ export function createOutboxDbClient(): Client {
 }
 
 /**
- * Latest `outbox_events` row for a given orderId. TypeORM's default naming
- * strategy keeps camelCase column names verbatim (no snake_case
- * transformation), hence the quoted `"createdAt"` identifier.
+ * La fila más reciente de `outbox_events` para un orderId dado. La estrategia de
+ * nombrado por defecto de TypeORM mantiene los nombres de columna en camelCase
+ * tal cual (sin transformación a snake_case), de ahí el identificador entre comillas `"createdAt"`.
  *
- * A single order transition can now fan out to more than one outbox row
- * (e.g. `order.status_changed` plus an `inventory.*` finalize event on
- * CONFIRMED/CANCELLED). Pass `eventType` to pin the query to one of them —
- * without it, "latest" is ambiguous between sibling rows inserted in the
- * same transaction and delivered independently.
+ * Una sola transición de orden ahora puede generar más de una fila de outbox
+ * (por ejemplo, `order.status_changed` más un evento finalize de `inventory.*` en
+ * CONFIRMED/CANCELLED). Pasar `eventType` para fijar la consulta a una de ellas —
+ * sin esto, "la más reciente" es ambiguo entre filas hermanas insertadas en la
+ * misma transacción y entregadas de forma independiente.
  */
 export async function findLatestOutboxEventForOrder(
   client: Client,
@@ -56,11 +56,11 @@ export async function findLatestOutboxEventForOrder(
 }
 
 /**
- * Counts `orders` rows for a given `userId` — used to prove a rejected
- * `POST /orders` (409 insufficient stock, 503 inventory unreachable)
- * never created an order row, without relying on the paginated
- * `GET /orders` listing (which mixes in rows from every other e2e test).
- * Each spec uses a unique `userId` per scenario, so this is exact.
+ * Cuenta filas de `orders` para un `userId` dado — se usa para probar que un
+ * `POST /orders` rechazado (409 stock insuficiente, 503 inventory inalcanzable)
+ * nunca creó una fila de orden, sin depender del listado paginado de
+ * `GET /orders` (que mezcla filas de todos los demás tests e2e).
+ * Cada spec usa un `userId` único por escenario, así que esto es exacto.
  */
 export async function countOrdersByUserId(
   client: Client,
