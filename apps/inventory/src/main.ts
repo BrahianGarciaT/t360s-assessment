@@ -28,6 +28,7 @@ async function bootstrap() {
       'Reserva/confirma/libera stock para el servicio orders vía TCP, y expone rutas HTTP de seeding para pruebas.',
     )
     .setVersion('1.0')
+    .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'x-api-key')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);

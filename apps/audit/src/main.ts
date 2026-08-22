@@ -28,6 +28,7 @@ async function bootstrap() {
       'Log de auditoría inmutable: recibe eventos de cambio de estado del servicio orders vía TCP y expone el historial de cada orden.',
     )
     .setVersion('1.0')
+    .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'x-api-key')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
