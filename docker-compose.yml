@@ -109,7 +109,6 @@ services:
       API_KEY: ${API_KEY}
     ports:
       - '3002:3002'
-      - '4002:4002'
     networks:
       - app-network
     depends_on:
@@ -137,7 +136,6 @@ services:
       AUDIT_MONGO_URI: ${AUDIT_MONGO_URI}
     ports:
       - '3001:3001'
-      - '4001:4001'
     networks:
       - app-network
     depends_on:
