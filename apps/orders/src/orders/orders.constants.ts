@@ -13,6 +13,14 @@ const DEFAULT_INVENTORY_CLIENT_CONFIG: InventoryClientConfig = {
   breakerResetTimeoutMs: 15000,
 };
 
+/**
+ * Solo acepta enteros `> 0` — un valor `0`, negativo, o no numérico cae en
+ * `fallback`. Gotcha conocido para el rollback del circuit breaker: poner
+ * `INVENTORY_BREAKER_FAILURE_THRESHOLD=0` NO lo desactiva, vuelve al default
+ * (`5`). Para desactivarlo efectivamente hay que usar un valor muy alto
+ * (p. ej. `1000000`) o revertir el cambio — ver README, sección "Circuit
+ * breaker en la llamada síncrona a inventory".
+ */
 function parseIntEnv(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === '') {
     return fallback;
