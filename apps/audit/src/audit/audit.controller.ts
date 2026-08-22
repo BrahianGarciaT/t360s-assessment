@@ -1,9 +1,11 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
-import { MessagePattern, Payload } from '@nestjs/microservices';
+import { EventPattern, MessagePattern, Payload } from '@nestjs/microservices';
 import { ApiOperation, ApiParam, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import {
   ApiKeyGuard,
+  INVENTORY_AUDIT_EVENTS,
+  InventoryAuditEvent,
   ORDER_EVENTS,
   OrderStatusChangedEvent,
   RpcApiKeyGuard,
@@ -38,6 +40,7 @@ export class AuditController {
     await this.auditService.createLog({
       eventId: event.eventId,
       orderId: event.orderId,
+      eventType: ORDER_EVENTS.STATUS_CHANGED,
       fromStatus: event.fromStatus,
       toStatus: event.toStatus,
       timestamp: new Date(event.timestamp),
@@ -48,6 +51,51 @@ export class AuditController {
     // objeto plano determinista evita serializar un documento de Mongoose
     // por TCP (referencias circulares, internals del driver) sin ningún beneficio.
     return { ok: true, eventId: event.eventId };
+  }
+
+  @EventPattern(INVENTORY_AUDIT_EVENTS.RESERVED)
+  @UseGuards(RpcApiKeyGuard)
+  async handleInventoryReserved(
+    @Payload() event: InventoryAuditEvent,
+  ): Promise<void> {
+    this.logger.info(
+      { eventId: event.eventId, orderId: event.orderId },
+      'Received inventory.reserved event',
+    );
+    await this.auditService.createInventoryLog(
+      INVENTORY_AUDIT_EVENTS.RESERVED,
+      event,
+    );
+  }
+
+  @EventPattern(INVENTORY_AUDIT_EVENTS.COMMITTED)
+  @UseGuards(RpcApiKeyGuard)
+  async handleInventoryCommitted(
+    @Payload() event: InventoryAuditEvent,
+  ): Promise<void> {
+    this.logger.info(
+      { eventId: event.eventId, orderId: event.orderId },
+      'Received inventory.committed event',
+    );
+    await this.auditService.createInventoryLog(
+      INVENTORY_AUDIT_EVENTS.COMMITTED,
+      event,
+    );
+  }
+
+  @EventPattern(INVENTORY_AUDIT_EVENTS.RELEASED)
+  @UseGuards(RpcApiKeyGuard)
+  async handleInventoryReleased(
+    @Payload() event: InventoryAuditEvent,
+  ): Promise<void> {
+    this.logger.info(
+      { eventId: event.eventId, orderId: event.orderId },
+      'Received inventory.released event',
+    );
+    await this.auditService.createInventoryLog(
+      INVENTORY_AUDIT_EVENTS.RELEASED,
+      event,
+    );
   }
 
   @Get(':orderId')
