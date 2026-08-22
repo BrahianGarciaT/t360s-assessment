@@ -110,6 +110,16 @@ export class InventoryRepository {
    * never happen in normal operation) case of a DIFFERENT eventId arriving
    * for an already-terminal reservation — still a safe no-op, never a
    * double-apply, but distinguished in logging from a true eventId replay.
+   *
+   * The reservation read takes a `pessimistic_write` lock (`SELECT ... FOR
+   * UPDATE`) rather than a plain read: under READ COMMITTED, two concurrent
+   * `finalize()` calls for the same `orderId` (e.g. the TTL reaper racing an
+   * outbox-delivered commit) could otherwise both read the row while it's
+   * still `HELD`, both pass the terminal-state guard, and both mutate stock —
+   * one write clobbering the other and risking a stock check-constraint
+   * violation. The lock serializes them: the second call blocks until the
+   * first transaction commits, then reads the POST-finalize state and no-ops
+   * via the terminal-state guard below instead of racing past a stale read.
    */
   async finalize(
     orderId: string,
@@ -121,6 +131,7 @@ export class InventoryRepository {
       const reservationRepo = manager.getRepository(Reservation);
       const reservation = await reservationRepo.findOne({
         where: { orderId },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!reservation) {

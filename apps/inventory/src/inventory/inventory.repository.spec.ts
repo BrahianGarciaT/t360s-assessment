@@ -267,6 +267,19 @@ describe('InventoryRepository', () => {
 
       expect(result).toBeNull();
     });
+
+    it('locks the reservation row for update before reading its status (closes the finalize TOCTOU race)', async () => {
+      const reservation = buildReservation();
+      reservationManagerRepo.findOne.mockResolvedValue(reservation);
+      reservationManagerRepo.save.mockImplementation((v) => v);
+
+      await repository.finalize('order-1', 'commit', 'event-abc');
+
+      expect(reservationManagerRepo.findOne).toHaveBeenCalledWith({
+        where: { orderId: 'order-1' },
+        lock: { mode: 'pessimistic_write' },
+      });
+    });
   });
 
   describe('claimExpired', () => {

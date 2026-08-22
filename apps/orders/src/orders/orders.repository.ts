@@ -65,17 +65,36 @@ export class OrdersRepository implements OnModuleInit {
   }
 
   /**
-   * Persists an updated order, refreshes its search vector, and inserts
-   * every outbox event returned by the factory in ONE transaction — same
-   * all-or-nothing guarantee as `create`. A status transition can produce
-   * more than one event (e.g. `order.status_changed` plus an inventory
-   * finalize/release event on CONFIRMED/CANCELLED).
+   * Reads the order with a `SELECT ... FOR UPDATE` (pessimistic write lock),
+   * lets `transition` validate and mutate it in place, persists the result,
+   * refreshes its search vector, and inserts every outbox event returned by
+   * the transition's event factory — all in ONE transaction. The lock is
+   * what closes the lost-update race: a concurrent `transitionStatus` call
+   * on the same order blocks on the row lock until this transaction commits
+   * or rolls back, so it always observes the post-transition state, never
+   * stale data. `transition` may throw (e.g. an invalid FSM transition) —
+   * the error propagates and the transaction rolls back with no side
+   * effects, since nothing has been saved yet at that point.
    */
-  async save(order: Order, event: OutboxEventFactory): Promise<Order> {
+  async transitionStatus(
+    id: string,
+    transition: (order: Order) => OutboxEventFactory,
+  ): Promise<Order | null> {
     return this.dataSource.transaction(async (manager) => {
-      const saved = await manager.getRepository(Order).save(order);
+      const orderRepo = manager.getRepository(Order);
+      const order = await orderRepo.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!order) {
+        return null;
+      }
+
+      const buildEvents = transition(order);
+      const saved = await orderRepo.save(order);
       await this.updateSearchVector(manager, saved.id);
-      for (const outboxEvent of event(saved)) {
+      for (const outboxEvent of buildEvents(saved)) {
         await this.outboxRepository.insertWithin(manager, outboxEvent);
       }
       return saved;
