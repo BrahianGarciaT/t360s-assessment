@@ -56,6 +56,7 @@ describe('InventoryService', () => {
       const result = await service.reserve({
         orderId: 'order-1',
         items: [{ productId: 'p1', quantity: 2 }],
+        apiKey: 'test-api-key',
       });
 
       expect(result).toEqual({
@@ -76,6 +77,7 @@ describe('InventoryService', () => {
       const result = await service.reserve({
         orderId: 'order-1',
         items: [{ productId: 'p1', quantity: 2 }],
+        apiKey: 'test-api-key',
       });
 
       expect(repository.findByOrderId).toHaveBeenCalledWith('order-1');
@@ -94,7 +96,11 @@ describe('InventoryService', () => {
       repository.findByOrderId.mockResolvedValue(null);
 
       await expect(
-        service.reserve({ orderId: 'order-1', items: [] }),
+        service.reserve({
+          orderId: 'order-1',
+          items: [],
+          apiKey: 'test-api-key',
+        }),
       ).rejects.toThrow('duplicate key');
     });
 
@@ -108,6 +114,7 @@ describe('InventoryService', () => {
       const result = await service.reserve({
         orderId: 'order-1',
         items: [{ productId: 'ghost', quantity: 1 }],
+        apiKey: 'test-api-key',
       });
 
       expect(result).toEqual({
@@ -127,6 +134,7 @@ describe('InventoryService', () => {
       const result = await service.reserve({
         orderId: 'order-1',
         items: [{ productId: 'p1', quantity: 5 }],
+        apiKey: 'test-api-key',
       });
 
       expect(result).toEqual({

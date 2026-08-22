@@ -85,7 +85,9 @@ describe('ReservationReaperService', () => {
     repository.claimExpired.mockResolvedValue(due);
     repository.finalize
       .mockRejectedValueOnce(new Error('constraint violation'))
-      .mockResolvedValueOnce(buildReservation({ status: ReservationStatus.RELEASED }));
+      .mockResolvedValueOnce(
+        buildReservation({ status: ReservationStatus.RELEASED }),
+      );
 
     await expect(service.reap()).resolves.not.toThrow();
 

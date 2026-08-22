@@ -8,6 +8,7 @@ import {
   InventoryFinalizeEvent,
   ReserveStockRequest,
   ReserveStockResponse,
+  RpcApiKeyGuard,
 } from '@app/shared';
 import { InventoryService } from './inventory.service';
 import { SetStockDto } from './dto/set-stock.dto';
@@ -21,6 +22,7 @@ export class InventoryController {
     private readonly logger: PinoLogger,
   ) {}
 
+  @UseGuards(RpcApiKeyGuard)
   @MessagePattern(INVENTORY_PATTERNS.RESERVE)
   async handleReserve(
     @Payload() request: ReserveStockRequest,
@@ -37,6 +39,7 @@ export class InventoryController {
     return this.inventoryService.reserve(request);
   }
 
+  @UseGuards(RpcApiKeyGuard)
   @MessagePattern(INVENTORY_PATTERNS.COMMIT)
   async handleCommit(
     @Payload() event: InventoryFinalizeEvent,
@@ -53,6 +56,7 @@ export class InventoryController {
     return this.inventoryService.commit(event.orderId, event.eventId);
   }
 
+  @UseGuards(RpcApiKeyGuard)
   @MessagePattern(INVENTORY_PATTERNS.RELEASE)
   async handleRelease(
     @Payload() event: InventoryFinalizeEvent,

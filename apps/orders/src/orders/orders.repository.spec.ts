@@ -10,7 +10,11 @@ describe('OrdersRepository', () => {
   let dataSource: { transaction: jest.Mock };
   let outboxRepository: jest.Mocked<Pick<OutboxRepository, 'insertWithin'>>;
   let manager: { getRepository: jest.Mock; query: jest.Mock };
-  let orderManagerRepo: { create: jest.Mock; save: jest.Mock; findOne: jest.Mock };
+  let orderManagerRepo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    findOne: jest.Mock;
+  };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
@@ -27,7 +31,11 @@ describe('OrdersRepository', () => {
     }) as Order;
 
   beforeEach(() => {
-    orderManagerRepo = { create: jest.fn(), save: jest.fn(), findOne: jest.fn() };
+    orderManagerRepo = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn(),
+    };
     manager = {
       getRepository: jest.fn().mockReturnValue(orderManagerRepo),
       query: jest.fn().mockResolvedValue(undefined),

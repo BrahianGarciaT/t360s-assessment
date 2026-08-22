@@ -5,6 +5,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { of, throwError, TimeoutError } from 'rxjs';
 import {
   INVENTORY_EVENTS,
@@ -35,6 +36,7 @@ describe('OrdersService', () => {
     >
   >;
   let inventoryClient: { send: jest.Mock };
+  let configService: { get: jest.Mock };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
@@ -61,6 +63,7 @@ describe('OrdersService', () => {
       transitionStatus: jest.fn(),
     };
     inventoryClient = { send: jest.fn() };
+    configService = { get: jest.fn().mockReturnValue('test-api-key') };
     (randomUUID as jest.Mock).mockReturnValue(GENERATED_ID);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -68,6 +71,7 @@ describe('OrdersService', () => {
         OrdersService,
         { provide: OrdersRepository, useValue: repository },
         { provide: INVENTORY_TCP_CLIENT, useValue: inventoryClient },
+        { provide: ConfigService, useValue: configService },
       ],
     }).compile();
 
@@ -108,6 +112,7 @@ describe('OrdersService', () => {
             { productId: 'p2', quantity: 3 },
           ],
           correlationId: 'corr-123',
+          apiKey: 'test-api-key',
         },
       );
       expect(repository.create).toHaveBeenCalledWith(

@@ -8,6 +8,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
 import { firstValueFrom, timeout } from 'rxjs';
 import {
   INVENTORY_EVENTS,
@@ -45,6 +46,7 @@ export class OrdersService {
     private readonly ordersRepository: OrdersRepository,
     @Inject(INVENTORY_TCP_CLIENT)
     private readonly inventoryClient: ClientProxy,
+    private readonly configService: ConfigService,
   ) {}
 
   async createOrder(
@@ -105,6 +107,7 @@ export class OrdersService {
         quantity: item.quantity,
       })),
       correlationId,
+      apiKey: this.configService.get<string>('API_KEY', ''),
     };
 
     let response: ReserveStockResponse;
