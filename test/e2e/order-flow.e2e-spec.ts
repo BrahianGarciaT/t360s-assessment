@@ -14,6 +14,7 @@ const ordersApi: AxiosInstance = axios.create({
 
 const auditApi: AxiosInstance = axios.create({
   baseURL: AUDIT_URL,
+  headers: { 'x-api-key': API_KEY },
   validateStatus: () => true,
 });
 

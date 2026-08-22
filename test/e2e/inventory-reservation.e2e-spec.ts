@@ -165,10 +165,28 @@ const dockerAvailable = isDockerComposeAvailable();
       });
       expect(seedRes.status).toBe(200);
 
-      const createRes = await ordersApi.post(
+      // El DNS interno de docker-compose puede tardar unos segundos en
+      // resolver `inventory` desde `orders` justo después del arranque
+      // (getaddrinfo EAI_AGAIN), incluso con el healthcheck ya en verde —
+      // un flake de infraestructura de CI, no de la app (misma clase de
+      // problema que documenta `withTransientRetry` en `helpers/wait.ts`,
+      // ahí para otro código de error). Reintenta puntualmente esta llamada
+      // si responde 503, en vez de fallar duro por una carrera de arranque.
+      let createRes = await ordersApi.post(
         '/orders',
         buildOrderPayload(userId, productId, 10),
       );
+      for (
+        let attempt = 0;
+        createRes.status === 503 && attempt < 3;
+        attempt++
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        createRes = await ordersApi.post(
+          '/orders',
+          buildOrderPayload(userId, productId, 10),
+        );
+      }
       expect(createRes.status).toBe(201);
       const orderId: string = createRes.data.id;
 
