@@ -9,7 +9,7 @@ import { getInventoryConfig, InventoryConfig } from './inventory.constants';
 import { ReleasedReason } from './entities/reservation.entity';
 import { StockItem } from './entities/stock-item.entity';
 
-// Postgres unique-violation SQLSTATE (raised on the reservations.orderId PK).
+// SQLSTATE de violación de unicidad de Postgres (se lanza sobre la PK reservations.orderId).
 const POSTGRES_UNIQUE_VIOLATION_ERROR_CODE = '23505';
 
 @Injectable()
@@ -25,10 +25,10 @@ export class InventoryService {
   }
 
   /**
-   * At-least-once redelivery from the orders outbox means the same orderId
-   * can arrive more than once. A duplicate is a successful no-op, not an
-   * error — mirrors AuditService.createLog's 11000 catch, but for
-   * Postgres's 23505 unique violation on the reservations.orderId PK.
+   * La reentrega at-least-once desde el outbox de orders implica que el mismo orderId
+   * puede llegar más de una vez. Un duplicado es un no-op exitoso, no un
+   * error — sigue el mismo patrón que el catch de 11000 en AuditService.createLog,
+   * pero para la violación de unicidad 23505 de Postgres sobre la PK reservations.orderId.
    */
   async reserve(request: ReserveStockRequest): Promise<ReserveStockResponse> {
     try {
@@ -70,11 +70,11 @@ export class InventoryService {
   }
 
   /**
-   * Dedup is keyed by `eventId` (mirrors `AuditService.createLog`'s
-   * dedup-by-eventId pattern), with the repository's terminal-state guard
-   * as a defensive fallback: an unknown, already-processed, or already
-   * terminal reservation still acks `{ ok: true }` here — `orders` is
-   * HTTP-only and has no callback channel to react to a late failure.
+   * La deduplicación se indexa por `eventId` (sigue el mismo patrón de deduplicación
+   * por eventId de `AuditService.createLog`), con la protección de estado terminal
+   * del repository como respaldo defensivo: una reserva desconocida, ya procesada, o
+   * ya en estado terminal igualmente responde con ack `{ ok: true }` aquí — `orders`
+   * es solo HTTP y no tiene un canal de callback para reaccionar ante un fallo tardío.
    */
   async commit(
     orderId: string,
@@ -114,7 +114,7 @@ export class InventoryService {
     return { ok: true, orderId };
   }
 
-  /** Idempotent fixture/demo seam backing `PUT /stock/:productId` — not a restock API. */
+  /** Punto de apoyo idempotente para fixtures/demo que respalda `PUT /stock/:productId` — no es una API de reabastecimiento. */
   async setStock(productId: string, quantity: number): Promise<StockItem> {
     return this.repository.upsertStock(productId, quantity);
   }

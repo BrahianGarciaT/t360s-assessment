@@ -3,9 +3,10 @@ import type { Params } from 'nestjs-pino';
 import { CORRELATION_ID_HEADER } from '../constants/correlation-id';
 
 /**
- * Shared pino-http config for both services: honors an inbound correlation
- * id (or mints one), echoes it on the response, and surfaces it as a
- * top-level `correlationId` field on every HTTP access log line.
+ * Configuración compartida de pino-http para ambos servicios: respeta un
+ * correlation id entrante (o genera uno nuevo), lo repite en la respuesta y
+ * lo expone como campo `correlationId` de nivel superior en cada línea de
+ * log de acceso HTTP.
  */
 export function createPinoLoggerOptions(serviceName: string): Params {
   return {

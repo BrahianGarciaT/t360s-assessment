@@ -1,12 +1,12 @@
 import { Client } from 'pg';
 
 /**
- * Host-side connection to `postgres-inventory` — the e2e process runs
- * outside the Docker network, so it must reach Postgres via the mapped
- * `localhost:5433` port from `docker-compose.yml` (`5433:5432`, a
- * different host port than the container's own 5432, unlike `orders`'s
- * `postgres`). User/password/db default to the values already checked
- * into `.env.example`. Mirrors `createOutboxDbClient()` in
+ * Conexión desde el lado del host hacia `postgres-inventory` — el proceso e2e
+ * corre fuera de la red de Docker, por lo que debe llegar a Postgres a través del
+ * puerto mapeado `localhost:5433` de `docker-compose.yml` (`5433:5432`, un
+ * puerto de host distinto al 5432 propio del contenedor, a diferencia del
+ * `postgres` de `orders`). Usuario/contraseña/db por defecto usan los valores ya
+ * versionados en `.env.example`. Refleja a `createOutboxDbClient()` en
  * `./postgres.ts`.
  */
 function resolveConnectionConfig() {
@@ -24,18 +24,18 @@ export function createInventoryDbClient(): Client {
 }
 
 /**
- * Forces a `held` reservation's `expiresAt` into the past, one minute
- * before now, so the next `@Cron(EVERY_MINUTE)` reaper tick
- * (`ReservationReaperService`) releases it on its own.
+ * Fuerza el `expiresAt` de una reserva `held` hacia el pasado, un minuto
+ * antes de ahora, para que el próximo tick del reaper `@Cron(EVERY_MINUTE)`
+ * (`ReservationReaperService`) la libere por su cuenta.
  *
- * `INVENTORY_RESERVATION_TTL_MINUTES` (default 15) is read once into
- * `ReservationReaperService`'s config at process startup
- * (`getInventoryConfig()`), so it cannot be overridden per-test without
- * restarting the `inventory` container — manipulating `expiresAt`
- * directly is the only way to exercise the reaper's auto-release path in
- * an e2e test without sleeping 15 real minutes. No-op (0 rows affected)
- * if the reservation is not currently `held` (e.g. already
- * committed/released).
+ * `INVENTORY_RESERVATION_TTL_MINUTES` (15 por defecto) se lee una sola vez hacia
+ * la configuración de `ReservationReaperService` al arrancar el proceso
+ * (`getInventoryConfig()`), por lo que no se puede sobrescribir por test sin
+ * reiniciar el contenedor `inventory` — manipular `expiresAt`
+ * directamente es la única forma de ejercitar el camino de auto-liberación del reaper en
+ * un test e2e sin dormir 15 minutos reales. Es un no-op (0 filas afectadas)
+ * si la reserva no está actualmente `held` (por ejemplo, ya
+ * confirmada/liberada).
  */
 export async function forceExpireReservation(
   client: Client,

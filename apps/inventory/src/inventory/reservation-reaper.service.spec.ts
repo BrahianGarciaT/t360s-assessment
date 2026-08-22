@@ -50,9 +50,9 @@ describe('ReservationReaperService', () => {
 
     expect(repository.claimExpired).toHaveBeenCalledWith(100);
     expect(repository.finalize).toHaveBeenCalledTimes(2);
-    // The reaper is an internal @Cron trigger, not a redelivered outbox
-    // event, so it synthesizes its own eventId (`internal:reaper:{orderId}`)
-    // to satisfy finalize()'s eventId-keyed dedup contract.
+    // El reaper es un disparador interno de @Cron, no un evento reentregado
+    // del outbox, así que sintetiza su propio eventId (`internal:reaper:{orderId}`)
+    // para cumplir el contrato de deduplicación por eventId de finalize().
     expect(repository.finalize).toHaveBeenNthCalledWith(
       1,
       'order-1',

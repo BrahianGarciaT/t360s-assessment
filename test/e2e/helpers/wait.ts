@@ -13,10 +13,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Polls `check` until it returns a truthy value or `timeoutMs` elapses.
- * Used instead of a fixed `setTimeout` because the outbox poller's own
- * delivery latency is not a constant (it depends on `OUTBOX_POLL_INTERVAL_MS`
- * and backoff), so a hardcoded sleep is either flaky or wastefully slow.
+ * Hace polling de `check` hasta que devuelve un valor truthy o transcurre `timeoutMs`.
+ * Se usa en lugar de un `setTimeout` fijo porque la latencia de entrega propia
+ * del poller del outbox no es constante (depende de `OUTBOX_POLL_INTERVAL_MS`
+ * y del backoff), por lo que un sleep fijo sería inestable o innecesariamente lento.
  */
 export async function waitUntil<T>(
   check: () => Promise<T | undefined | null | false>,
@@ -48,10 +48,10 @@ const TRANSIENT_NETWORK_ERROR_CODES = new Set([
 ]);
 
 /**
- * True for connection-level failures a real HTTP client would retry
- * transparently (dropped/reset socket, refused connection) — never for an
- * HTTP response, even an error one (4xx/5xx), which callers must keep
- * handling themselves.
+ * Verdadero para fallas a nivel de conexión que un cliente HTTP real reintentaría
+ * de forma transparente (socket caído/reseteado, conexión rechazada) — nunca para
+ * una respuesta HTTP, incluso una de error (4xx/5xx), que los llamadores deben seguir
+ * manejando por su cuenta.
  */
 function isTransientNetworkError(error: unknown): boolean {
   if (!(error instanceof Error)) {
@@ -61,39 +61,39 @@ function isTransientNetworkError(error: unknown): boolean {
   if (code !== undefined && TRANSIENT_NETWORK_ERROR_CODES.has(code)) {
     return true;
   }
-  // Node sets message "socket hang up" for a premature close without
-  // always attaching `.code` through axios's error wrapping — match on
-  // message too so we don't miss it.
+  // Node asigna el mensaje "socket hang up" para un cierre prematuro sin
+  // adjuntar siempre `.code` a través del envoltorio de error de axios — comparar
+  // también por mensaje para no perderlo.
   return error.message.includes('socket hang up');
 }
 
 /**
- * Retries `fn` a bounded number of times, but only when it fails with a
- * transient connection-level network error — never for assertion failures
- * or HTTP error responses, which propagate immediately.
+ * Reintenta `fn` una cantidad acotada de veces, pero solo cuando falla con un
+ * error de red transitorio a nivel de conexión — nunca para fallos de aserción
+ * o respuestas HTTP de error, que se propagan de inmediato.
  *
- * Why this exists: in CI (GitHub Actions, Linux runners) the `PUT
- * /orders/:id/status` request issued immediately after `stopService('audit')`
- * has been observed to fail with ECONNRESET/"socket hang up" against
- * `orders` — a *different* container than the one being stopped, on the
- * same `app-network` bridge. This was investigated as a possible app bug
- * and ruled out with direct evidence:
- *   - `docker compose logs` across two separate CI runs shows a single,
- *     uninterrupted NestJS boot for `orders` ("Starting Nest
- *     application..." -> "...successfully started"), no error/exception
- *     logged, and the container stays up until the job's own teardown.
- *   - The `PUT` handler never talks to `audit` synchronously — the outbox
- *     poller delivers to `audit` on its own interval, decoupled from the
- *     request/response cycle (see `outbox-poller.service.ts`).
- *   - Never reproduced locally (8 full e2e runs against Docker Desktop on
- *     Windows) — only ever seen on GitHub Actions' native Linux Docker
- *     daemon, which is consistent with a brief iptables/NAT reprogramming
- *     blip on the shared bridge network when a sibling container is
- *     stopped, not an application-level failure.
- * A real client hitting a genuinely transient network blip would retry
- * rather than surface it as a hard failure, so this test does the same —
- * scoped tightly to the one request known to be affected, not as a general
- * safety net that could mask a real regression.
+ * Por qué existe esto: en CI (GitHub Actions, runners Linux) se ha observado que la
+ * solicitud `PUT /orders/:id/status` emitida inmediatamente después de `stopService('audit')`
+ * falla con ECONNRESET/"socket hang up" contra
+ * `orders` — un contenedor *distinto* al que se está deteniendo, en la
+ * misma red bridge `app-network`. Esto se investigó como un posible bug de la app
+ * y se descartó con evidencia directa:
+ *   - `docker compose logs` en dos corridas de CI separadas muestra un único
+ *     arranque ininterrumpido de NestJS para `orders` ("Starting Nest
+ *     application..." -> "...successfully started"), sin error/excepción
+ *     registrado, y el contenedor se mantiene arriba hasta el propio teardown del job.
+ *   - El handler de `PUT` nunca se comunica con `audit` de forma síncrona — el
+ *     poller del outbox entrega a `audit` según su propio intervalo, desacoplado del
+ *     ciclo de solicitud/respuesta (ver `outbox-poller.service.ts`).
+ *   - Nunca se reprodujo localmente (8 corridas e2e completas contra Docker Desktop en
+ *     Windows) — solo se vio en el demonio Docker Linux nativo de GitHub Actions,
+ *     lo cual es consistente con un breve percance de reprogramación de iptables/NAT
+ *     en la red bridge compartida cuando se detiene un contenedor hermano,
+ *     no una falla a nivel de aplicación.
+ * Un cliente real que se topara con un percance de red genuinamente transitorio reintentaría
+ * en lugar de mostrarlo como una falla dura, así que este test hace lo mismo —
+ * acotado estrictamente a la única solicitud que se sabe afectada, no como una red de
+ * seguridad general que podría enmascarar una regresión real.
  */
 export async function withTransientRetry<T>(
   fn: () => Promise<T>,
@@ -113,14 +113,14 @@ export async function withTransientRetry<T>(
       await sleep(delayMs);
     }
   }
-  // Unreachable: the loop above always either returns or throws.
+  // Inalcanzable: el bucle de arriba siempre retorna o lanza una excepción.
   throw new Error('withTransientRetry: exhausted attempts unexpectedly');
 }
 
 /**
- * Polls `GET /audit/:orderId` until it returns exactly `expectedCount`
- * records (200 with a matching array length). Tolerates `audit` being
- * temporarily unreachable (ECONNREFUSED / non-200) between attempts.
+ * Hace polling de `GET /audit/:orderId` hasta que devuelve exactamente `expectedCount`
+ * registros (200 con un array de longitud coincidente). Tolera que `audit` esté
+ * temporalmente inalcanzable (ECONNREFUSED / no-200) entre intentos.
  */
 export async function waitForAuditLogs(
   auditApi: AxiosInstance,

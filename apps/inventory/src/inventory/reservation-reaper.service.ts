@@ -5,10 +5,10 @@ import { InventoryRepository } from './inventory.repository';
 import { getInventoryConfig, InventoryConfig } from './inventory.constants';
 
 /**
- * Compensation safety net for the reserve→commit/cancel window: releases
- * `held` reservations that never reached a terminal state before their
- * TTL, returning the reserved quantity to available stock. Mirrors
- * `OutboxPurgeService`'s idiom (config clone + `@Cron`).
+ * Red de seguridad de compensación para la ventana reserve→commit/cancel: libera
+ * reservas `held` que nunca alcanzaron un estado terminal antes de su
+ * TTL, devolviendo la cantidad reservada al stock disponible. Sigue el mismo
+ * patrón de `OutboxPurgeService` (copia de config + `@Cron`).
  */
 @Injectable()
 export class ReservationReaperService {
@@ -29,12 +29,12 @@ export class ReservationReaperService {
     );
 
     for (const reservation of expired) {
-      // The reaper is an internal @Cron trigger, not a redelivered outbox
-      // event, so there is no real `eventId` to forward. Synthesize one so
-      // this call satisfies finalize()'s eventId-keyed dedup contract the
-      // same way a real event would — deterministic and unique per
-      // reservation, since claimExpired only ever returns a HELD reservation
-      // once (it stops matching the HELD filter as soon as it is released).
+      // El reaper es un disparador interno de @Cron, no un evento reentregado
+      // del outbox, así que no hay un `eventId` real que reenviar. Se sintetiza uno para
+      // que esta llamada cumpla el contrato de deduplicación por eventId de finalize(),
+      // tal como lo haría un evento real — determinista y único por
+      // reserva, ya que claimExpired solo devuelve una reserva HELD
+      // una vez (deja de coincidir con el filtro HELD en cuanto se libera).
       try {
         await this.inventoryRepository.finalize(
           reservation.orderId,

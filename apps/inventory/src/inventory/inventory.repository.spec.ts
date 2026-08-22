@@ -75,10 +75,10 @@ describe('InventoryRepository', () => {
 
   describe('reserve', () => {
     it('sums duplicate productIds and applies conditional UPDATEs sorted by productId ASC', async () => {
-      // TypeORM's Postgres driver returns `manager.query()` results for a
-      // non-SELECT statement as a `[rows, affectedRowCount]` tuple, not a
-      // bare rows array — every mock below must match that real shape.
-      // two lines for the SAME productId, plus a second product that sorts first
+      // El driver de Postgres de TypeORM devuelve los resultados de `manager.query()`
+      // para una sentencia que no es un SELECT como una tupla `[rows, affectedRowCount]`,
+      // no como un array de filas plano — cada mock de abajo debe respetar esa forma real.
+      // dos líneas para el MISMO productId, más un segundo producto que ordena primero
       manager.query.mockResolvedValue([[{ productId: 'irrelevant' }], 1]);
       reservationManagerRepo.save.mockImplementation((v) => v);
 
@@ -95,7 +95,7 @@ describe('InventoryRepository', () => {
       );
 
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
-      // 'apple' sorts before 'zebra'; 'zebra' quantities (3+2) summed to 5
+      // 'apple' ordena antes que 'zebra'; las cantidades de 'zebra' (3+2) se suman a 5
       expect(manager.query).toHaveBeenNthCalledWith(
         1,
         expect.stringContaining('UPDATE stock_items'),
@@ -120,7 +120,7 @@ describe('InventoryRepository', () => {
     });
 
     it('rejects with INSUFFICIENT_STOCK and rolls back when the conditional UPDATE affects zero rows', async () => {
-      manager.query.mockResolvedValueOnce([[], 0]); // affected === 0 -> shortfall path
+      manager.query.mockResolvedValueOnce([[], 0]); // affected === 0 -> camino de faltante (shortfall)
       stockManagerRepo.findOne.mockResolvedValue({
         productId: 'p1',
         quantity: 5,
@@ -138,10 +138,10 @@ describe('InventoryRepository', () => {
     });
 
     it('rolls back the WHOLE transaction (no reservation saved) when only one item among several lacks stock', async () => {
-      // first item (sorted first) succeeds, second item fails -> whole tx must reject
+      // el primer item (el que ordena primero) tiene éxito, el segundo falla -> toda la tx debe rechazarse
       manager.query
-        .mockResolvedValueOnce([[{ productId: 'apple' }], 1]) // apple succeeds
-        .mockResolvedValueOnce([[], 0]); // zebra fails
+        .mockResolvedValueOnce([[{ productId: 'apple' }], 1]) // apple tiene éxito
+        .mockResolvedValueOnce([[], 0]); // zebra falla
       stockManagerRepo.findOne.mockResolvedValue({
         productId: 'zebra',
         quantity: 2,
@@ -161,8 +161,8 @@ describe('InventoryRepository', () => {
         ),
       ).rejects.toThrow(ReservationRejectedError);
 
-      // proves the failure propagated out of the transaction callback so
-      // dataSource.transaction() rolls back the apple UPDATE too
+      // demuestra que el fallo se propagó fuera del callback de la transacción, de modo que
+      // dataSource.transaction() revierte también el UPDATE de apple
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
       expect(reservationManagerRepo.save).not.toHaveBeenCalled();
     });

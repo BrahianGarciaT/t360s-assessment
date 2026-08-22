@@ -252,11 +252,11 @@ describe('OrdersService', () => {
   });
 
   describe('updateStatus', () => {
-    // Mimics the real OrdersRepository#transitionStatus contract: reads the
-    // order, invokes `transition` (which validates + mutates `order.status`
-    // in place and returns the event factory), and resolves the mutated
-    // order — capturing the event factory into `buildEvents` so tests can
-    // assert on the events it produces.
+    // Imita el contrato real de OrdersRepository#transitionStatus: lee la
+    // orden, invoca `transition` (que valida + muta `order.status` in place
+    // y devuelve el event factory), y resuelve la orden mutada — capturando
+    // el event factory en `buildEvents` para que los tests puedan hacer
+    // assert sobre los eventos que produce.
     const mockTransitionStatus = (
       order: Order,
     ): { buildEvents: () => OutboxEventFactory } => {

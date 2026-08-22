@@ -2,17 +2,17 @@ import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 
 /**
- * Repository root, resolved from this file's own location — independent of
- * whatever cwd Jest happens to be invoked from. `docker compose` must run
- * from here so it picks up the root `docker-compose.yml` and `.env`.
+ * Raíz del repositorio, resuelta a partir de la ubicación de este mismo archivo —
+ * independiente de cualquier cwd desde el que se invoque Jest. `docker compose` debe
+ * correr desde aquí para que tome el `docker-compose.yml` y `.env` de la raíz.
  */
 export const repoRoot = path.resolve(__dirname, '..', '..', '..');
 
 /**
- * Probes for a usable Docker Compose v2 CLI (`docker compose`, no hyphen —
- * `docker-compose` is not guaranteed to exist, see `.github/workflows/ci.yml`).
- * Never throws: callers use this to `describe.skip` the suite instead of
- * failing when Docker isn't available in the execution environment.
+ * Sondea si hay una CLI utilizable de Docker Compose v2 (`docker compose`, sin guion —
+ * no está garantizado que `docker-compose` exista, ver `.github/workflows/ci.yml`).
+ * Nunca lanza excepciones: los llamadores usan esto para hacer `describe.skip` de la suite en lugar de
+ * fallar cuando Docker no está disponible en el entorno de ejecución.
  */
 export function isDockerComposeAvailable(): boolean {
   try {
@@ -27,9 +27,9 @@ export function isDockerComposeAvailable(): boolean {
 }
 
 /**
- * Stops a single Compose service without touching the others.
- * Argv is always a static array (service name is one of a fixed literal
- * set passed by call sites in this suite) — never shell-interpolated.
+ * Detiene un único servicio de Compose sin tocar los demás.
+ * Argv siempre es un array estático (el nombre del servicio es uno de un conjunto
+ * literal fijo pasado por los call sites de esta suite) — nunca interpolado por shell.
  */
 export function stopService(service: string): void {
   execFileSync('docker', ['compose', 'stop', service], {
@@ -38,7 +38,7 @@ export function stopService(service: string): void {
   });
 }
 
-/** Restarts a previously-stopped Compose service. */
+/** Reinicia un servicio de Compose previamente detenido. */
 export function startService(service: string): void {
   execFileSync('docker', ['compose', 'start', service], {
     cwd: repoRoot,

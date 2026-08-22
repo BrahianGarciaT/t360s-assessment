@@ -40,9 +40,9 @@ describe('Order flow (e2e)', () => {
   let orderId: string;
 
   beforeAll(async () => {
-    // Gate: POST /orders now reserves stock synchronously against `inventory`
-    // before creating the order (409/503 otherwise). Seed enough stock for
-    // every item this suite's ORDER_PAYLOAD requests.
+    // Gate: POST /orders ahora reserva stock de forma síncrona contra `inventory`
+    // antes de crear la orden (409/503 en caso contrario). Sembrar stock suficiente
+    // para cada ítem que el ORDER_PAYLOAD de esta suite solicita.
     const res = await inventoryApi.put('/stock/prod-e2e-01', {
       quantity: 1000,
     });
@@ -121,9 +121,9 @@ describe('Order flow (e2e)', () => {
   });
 
   it('GET /audit/:orderId — recorded all status changes', async () => {
-    // Delivery latency now depends on the outbox poller's interval
-    // (`OUTBOX_POLL_INTERVAL_MS`, default 2s) instead of being near-immediate,
-    // so a fixed sleep would be either flaky or wastefully slow — poll instead.
+    // La latencia de entrega ahora depende del intervalo del poller del outbox
+    // (`OUTBOX_POLL_INTERVAL_MS`, 2s por defecto) en lugar de ser casi inmediata,
+    // por lo que un sleep fijo sería inestable o innecesariamente lento — mejor hacer polling.
     await waitForAuditLogs(auditApi, orderId, 3, 20_000);
 
     const res = await auditApi.get(`/audit/${orderId}`);

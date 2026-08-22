@@ -18,7 +18,7 @@ export class OutboxRepository {
     private readonly repository: Repository<OutboxEvent>,
   ) {}
 
-  /** Inserted within the caller's transaction manager — never through `this.repository`. */
+  /** Se inserta dentro del transaction manager del caller — nunca a través de `this.repository`. */
   async insertWithin(
     manager: EntityManager,
     event: OutboxEventInput,
@@ -42,7 +42,7 @@ export class OutboxRepository {
     });
   }
 
-  /** Must run BEFORE the delivery attempt: a crash mid-send reschedules instead of hot-looping. */
+  /** Debe ejecutarse ANTES del intento de entrega: un crash a mitad del envío reprograma en vez de hacer hot-looping. */
   async markAttempt(
     row: OutboxEvent,
     backoffBaseMs: number,
@@ -73,7 +73,7 @@ export class OutboxRepository {
     });
   }
 
-  /** `attempts` already reflects the bump from `markAttempt` — decides pending (retryable) vs failed. */
+  /** `attempts` ya refleja el incremento de `markAttempt` — decide entre pending (reintentable) vs failed. */
   async markError(
     id: string,
     attempts: number,
@@ -90,7 +90,7 @@ export class OutboxRepository {
     });
   }
 
-  /** Purges delivered rows past their retention window. Returns the number of rows removed. */
+  /** Purga las filas entregadas que superan su ventana de retención. Devuelve la cantidad de filas eliminadas. */
   async deleteSentOlderThan(cutoff: Date): Promise<number> {
     const result = await this.repository.delete({
       status: OutboxEventStatus.SENT,

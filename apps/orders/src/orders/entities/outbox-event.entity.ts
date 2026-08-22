@@ -10,7 +10,7 @@ import { OutboxEventStatus } from '../outbox.constants';
 @Entity('outbox_events')
 @Index('IDX_OUTBOX_DISPATCH', ['status', 'nextAttemptAt'])
 export class OutboxEvent {
-  /** Also travels on the wire as `eventId` — one identity, no divergence across retries. */
+  /** También viaja por el wire como `eventId` — una sola identidad, sin divergencia entre reintentos. */
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

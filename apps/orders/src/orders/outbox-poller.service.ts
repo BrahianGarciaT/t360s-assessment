@@ -9,19 +9,21 @@ import { OutboxRepository } from './outbox.repository';
 import { getOutboxConfig, OutboxConfig } from './outbox.constants';
 import { OutboxEvent } from './entities/outbox-event.entity';
 
-// Read once at module load — @Interval requires a static value, and env vars
-// are already available at process startup (no ConfigService/DI needed here).
+// Se lee una sola vez al cargar el módulo — @Interval requiere un valor
+// estático, y las env vars ya están disponibles al iniciar el proceso (no se
+// necesita ConfigService/DI aquí).
 const POLL_INTERVAL_MS = getOutboxConfig().pollIntervalMs;
 
 /**
- * Maps an outbox `eventType` to the TCP `@MessagePattern` `inventory`
- * actually listens on. `order.*` events reuse the eventType verbatim as the
- * pattern (audit's `@MessagePattern(ORDER_EVENTS.STATUS_CHANGED)` matches
- * the stored eventType 1:1) — inventory's finalize/release patterns
- * (`inventory.commit` / `inventory.release`) intentionally differ from the
- * outbox eventType names (`inventory.commit_requested` /
- * `inventory.release_requested`, which describe what was *requested*, not
- * the RPC being invoked), so this translation table is required.
+ * Mapea un `eventType` de outbox al `@MessagePattern` TCP que `inventory`
+ * realmente escucha. Los eventos `order.*` reutilizan el eventType tal cual
+ * como pattern (el `@MessagePattern(ORDER_EVENTS.STATUS_CHANGED)` de audit
+ * coincide 1:1 con el eventType almacenado) — los patterns de
+ * finalize/release de inventory (`inventory.commit` / `inventory.release`)
+ * difieren intencionalmente de los nombres de eventType del outbox
+ * (`inventory.commit_requested` / `inventory.release_requested`, que
+ * describen lo que se *solicitó*, no el RPC que se invoca), por lo que esta
+ * tabla de traducción es necesaria.
  */
 const INVENTORY_EVENT_TYPE_TO_PATTERN: Record<string, string> = {
   [INVENTORY_EVENTS.COMMIT_REQUESTED]: INVENTORY_PATTERNS.COMMIT,
@@ -64,10 +66,11 @@ export class OutboxPollerService {
   }
 
   /**
-   * Routes an outbox row to its destination by `eventType` prefix
-   * (`order.*` → audit, `inventory.*` → inventory). Returns `null` for an
-   * unroutable eventType — the caller MUST `markError`, never guess a
-   * client (threat matrix: a malformed row must never be misdelivered).
+   * Enruta una fila de outbox a su destino según el prefijo del `eventType`
+   * (`order.*` → audit, `inventory.*` → inventory). Devuelve `null` para un
+   * eventType no enrutable — el caller DEBE llamar a `markError`, nunca
+   * adivinar un client (matriz de amenazas: una fila malformada nunca debe
+   * entregarse al destino equivocado).
    */
   private resolveDestination(eventType: string): OutboxDestination | null {
     if (eventType.startsWith('order.')) {
@@ -80,8 +83,9 @@ export class OutboxPollerService {
   }
 
   /**
-   * Drains due outbox events oldest-first. `@Interval` does not skip
-   * overlapping ticks by itself, hence the in-memory re-entrancy guard.
+   * Drena los eventos de outbox vencidos en orden del más antiguo al más
+   * reciente. `@Interval` no salta ticks superpuestos por sí solo, de ahí el
+   * guard de re-entrancy en memoria.
    */
   @Interval(POLL_INTERVAL_MS)
   async tick(): Promise<void> {
@@ -92,9 +96,9 @@ export class OutboxPollerService {
 
     try {
       const rows = await this.outboxRepository.claimDue(this.config.batchSize);
-      // Per-destination failure isolation (design decision #8): a down peer
-      // stops hammering ITS rows for the rest of this tick, but never stalls
-      // delivery to a different, healthy destination.
+      // Aislamiento de fallas por destino (decisión de diseño #8): un peer
+      // caído deja de martillar SUS filas por el resto de este tick, pero
+      // nunca bloquea la entrega a otro destino sano.
       const failedDestinations = new Set<string>();
 
       for (const row of rows) {
@@ -140,8 +144,9 @@ export class OutboxPollerService {
     destination: OutboxDestination,
     failedDestinations: Set<string>,
   ): Promise<void> {
-    // Bump attempts/backoff BEFORE emitting: a crash mid-send reschedules
-    // instead of hot-looping the same failing row forever.
+    // Incrementa attempts/backoff ANTES de emitir: un crash a mitad del envío
+    // reprograma en vez de hacer hot-looping para siempre sobre la misma
+    // fila fallida.
     await this.outboxRepository.markAttempt(
       row,
       this.config.backoffBaseMs,
@@ -177,19 +182,21 @@ export class OutboxPollerService {
       );
       failedDestinations.add(destination.name);
 
-      // Force a fresh socket next tick, on the FAILED destination's client
-      // only (design open question, resolved). Verified (not assumed): once
-      // the peer disappears, ClientTCP.connect() otherwise keeps returning
-      // the same stale rejected connectionPromise forever and never
-      // attempts a new socket — reconnection never recovers, even after the
-      // peer is reachable again — unless something resets its internal
-      // state. `close()` does that reset.
+      // Fuerza un socket nuevo en el próximo tick, solo en el client del
+      // destino que FALLÓ (pregunta abierta de diseño, resuelta). Verificado
+      // (no asumido): una vez que el peer desaparece, ClientTCP.connect() de
+      // lo contrario sigue devolviendo para siempre la misma
+      // connectionPromise obsoleta y rechazada, y nunca intenta un socket
+      // nuevo — la reconexión nunca se recupera, incluso después de que el
+      // peer vuelve a estar disponible — a menos que algo resetee su estado
+      // interno. `close()` hace ese reset.
       //
-      // Never let a failure here escape tick(): `@Interval` only wraps the
-      // awaited method call in try/catch, not a stray synchronous throw
-      // from close() itself (or anything it triggers outside that call
-      // stack). An uncaught rejection anywhere in the process is fatal by
-      // default on Node >=15, so this must never propagate.
+      // Nunca dejes que una falla acá escape de tick(): `@Interval` solo
+      // envuelve en try/catch la llamada awaited al método, no un throw
+      // síncrono suelto proveniente del propio close() (o de cualquier cosa
+      // que dispare fuera de ese call stack). Un rechazo no capturado en
+      // cualquier parte del proceso es fatal por defecto en Node >=15, así
+      // que esto nunca debe propagarse.
       try {
         destination.client.close();
       } catch (closeError) {

@@ -66,8 +66,8 @@ export class InventoryController {
       'Received inventory.release_requested event',
     );
 
-    // Only order cancellation drives this pattern from orders; TTL expiry is
-    // released internally by the reaper, never over this TCP pattern.
+    // Solo la cancelación de una orden dispara este patrón desde orders; la expiración por TTL
+    // se libera internamente mediante el reaper, nunca a través de este patrón TCP.
     return this.inventoryService.release(
       event.orderId,
       event.eventId,

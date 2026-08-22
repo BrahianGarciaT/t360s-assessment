@@ -7,9 +7,9 @@ import {
 } from 'typeorm';
 
 /**
- * `quantity` is total on-hand stock; `reserved` is stock held by `held`
- * reservations. Available stock is always derived (`quantity - reserved`),
- * never stored, so it can never drift out of sync.
+ * `quantity` es el stock total disponible en existencia; `reserved` es el stock retenido por
+ * reservas `held`. El stock disponible siempre se deriva (`quantity - reserved`),
+ * nunca se almacena, por lo que nunca puede desincronizarse.
  */
 @Entity('stock_items')
 @Check(

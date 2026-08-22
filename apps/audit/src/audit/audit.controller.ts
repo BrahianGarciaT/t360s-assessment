@@ -38,9 +38,9 @@ export class AuditController {
       metadata: event.metadata,
     });
 
-    // `send()` on the orders side needs a real application-level ack — a
-    // deterministic plain object avoids serializing a Mongoose document
-    // over TCP (circular refs, driver internals) for no benefit.
+    // `send()` del lado de orders necesita un ack real a nivel de aplicación — un
+    // objeto plano determinista evita serializar un documento de Mongoose
+    // por TCP (referencias circulares, internals del driver) sin ningún beneficio.
     return { ok: true, eventId: event.eventId };
   }
 

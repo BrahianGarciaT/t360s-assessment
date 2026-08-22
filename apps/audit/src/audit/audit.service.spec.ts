@@ -25,8 +25,8 @@ describe('AuditService', () => {
     findOneMock = jest.fn();
     findMock = jest.fn();
 
-    // The Mongoose model is used both as a constructor (`new this.auditLogModel(dto)`)
-    // and as a static namespace (`.findOne`, `.find`) — mock both shapes.
+    // El modelo de Mongoose se usa tanto como constructor (`new this.auditLogModel(dto)`)
+    // como espacio de nombres estático (`.findOne`, `.find`) — se simulan (mock) ambas formas.
     modelConstructorMock = jest.fn().mockImplementation((dto) => ({
       ...dto,
       save: saveMock,

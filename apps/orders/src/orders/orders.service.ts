@@ -57,9 +57,9 @@ export class OrdersService {
       0,
     );
 
-    // Reserve stock BEFORE the order transaction — deliberately outside the
-    // local tx (design decision #1). A rejection or transport failure must
-    // never create an order row or a partial reservation.
+    // Reserva el stock ANTES de la transacción de la orden — deliberadamente
+    // fuera de la tx local (decisión de diseño #1). Un rechazo o un fallo de
+    // transporte nunca debe crear una fila de orden ni una reserva parcial.
     await this.reserveStock(id, dto.items, correlationId);
 
     return this.ordersRepository.create(
@@ -87,9 +87,10 @@ export class OrdersService {
   }
 
   /**
-   * Calls `inventory.reserve` synchronously over `INVENTORY_TCP_CLIENT`.
-   * Maps a resolved rejection to 409 and any transport failure/timeout to
-   * 503 — the system never degrades open (design decision #6, spec
+   * Llama a `inventory.reserve` de forma síncrona a través de
+   * `INVENTORY_TCP_CLIENT`. Mapea un rechazo resuelto a 409 y cualquier
+   * fallo de transporte/timeout a 503 — el sistema nunca degrada en modo
+   * abierto (decisión de diseño #6, spec
    * "Hard failure when inventory is unreachable").
    */
   private async reserveStock(
@@ -192,9 +193,9 @@ export class OrdersService {
             },
           ];
 
-          // Same-transaction finalize/release fan-out (design decision #7):
-          // the order status change and the inventory event are
-          // all-or-nothing.
+          // Fan-out de finalize/release en la misma transacción (decisión de
+          // diseño #7): el cambio de estado de la orden y el evento de
+          // inventario son todo-o-nada.
           if (saved.status === OrderStatus.CONFIRMED) {
             events.push({
               eventType: INVENTORY_EVENTS.COMMIT_REQUESTED,

@@ -4,7 +4,7 @@ export interface ReserveStockItem {
 }
 
 export interface ReserveStockRequest {
-  /** Idempotency key — mirrors `reservations.orderId` PK. */
+  /** Clave de idempotencia — refleja la PK de `reservations.orderId`. */
   orderId: string;
   items: ReserveStockItem[];
   correlationId?: string;
@@ -24,7 +24,7 @@ export type ReserveStockResponse =
       shortfalls: StockShortfall[];
     };
 
-/** Carried by the outbox, so `eventId` is present exactly like `OrderStatusChangedEvent`. */
+/** Transportado por el outbox, por lo que `eventId` está presente igual que en `OrderStatusChangedEvent`. */
 export interface InventoryFinalizeEvent {
   eventId: string;
   orderId: string;

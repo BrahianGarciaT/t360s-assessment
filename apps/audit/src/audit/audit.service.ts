@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import { AuditLog, AuditLogDocument } from './schemas/audit-log.schema';
 import { CreateAuditLogDto } from './dto/create-audit-log.dto';
 
-// MongoDB duplicate-key error code (unique index violation).
+// Código de error de clave duplicada de MongoDB (violación de índice único).
 const MONGO_DUPLICATE_KEY_ERROR_CODE = 11000;
 
 @Injectable()
@@ -17,10 +17,10 @@ export class AuditService {
   ) {}
 
   /**
-   * At-least-once delivery from the outbox poller means the same eventId can
-   * arrive more than once. A duplicate is a successful no-op, not an error —
-   * throwing here would propagate through `send()` and the poller would
-   * retry an event that was already recorded.
+   * La entrega at-least-once del poller del outbox implica que el mismo eventId
+   * puede llegar más de una vez. Un duplicado es un no-op exitoso, no un error —
+   * lanzar una excepción aquí se propagaría a través de `send()` y el poller
+   * reintentaría un evento que ya fue registrado.
    */
   async createLog(dto: CreateAuditLogDto): Promise<AuditLog> {
     try {
