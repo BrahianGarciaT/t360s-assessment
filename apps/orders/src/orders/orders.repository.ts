@@ -5,7 +5,7 @@ import { Order } from './entities/order.entity';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { OutboxRepository, OutboxEventInput } from './outbox.repository';
 
-export type OutboxEventFactory = (order: Order) => OutboxEventInput;
+export type OutboxEventFactory = (order: Order) => OutboxEventInput[];
 
 @Injectable()
 export class OrdersRepository implements OnModuleInit {
@@ -23,9 +23,9 @@ export class OrdersRepository implements OnModuleInit {
   }
 
   /**
-   * Creates the order, refreshes its search vector, and inserts the outbox
-   * event in ONE transaction. If the outbox insert fails, everything rolls
-   * back — the order is never persisted.
+   * Creates the order, refreshes its search vector, and inserts every outbox
+   * event returned by the factory in ONE transaction. If any outbox insert
+   * fails, everything rolls back — the order is never persisted.
    */
   async create(
     data: Partial<Order>,
@@ -35,7 +35,9 @@ export class OrdersRepository implements OnModuleInit {
       const orderRepo = manager.getRepository(Order);
       const order = await orderRepo.save(orderRepo.create(data));
       await this.updateSearchVector(manager, order.id);
-      await this.outboxRepository.insertWithin(manager, event(order));
+      for (const outboxEvent of event(order)) {
+        await this.outboxRepository.insertWithin(manager, outboxEvent);
+      }
       return order;
     });
   }
@@ -63,14 +65,19 @@ export class OrdersRepository implements OnModuleInit {
   }
 
   /**
-   * Persists an updated order, refreshes its search vector, and inserts the
-   * outbox event in ONE transaction — same all-or-nothing guarantee as `create`.
+   * Persists an updated order, refreshes its search vector, and inserts
+   * every outbox event returned by the factory in ONE transaction — same
+   * all-or-nothing guarantee as `create`. A status transition can produce
+   * more than one event (e.g. `order.status_changed` plus an inventory
+   * finalize/release event on CONFIRMED/CANCELLED).
    */
   async save(order: Order, event: OutboxEventFactory): Promise<Order> {
     return this.dataSource.transaction(async (manager) => {
       const saved = await manager.getRepository(Order).save(order);
       await this.updateSearchVector(manager, saved.id);
-      await this.outboxRepository.insertWithin(manager, event(saved));
+      for (const outboxEvent of event(saved)) {
+        await this.outboxRepository.insertWithin(manager, outboxEvent);
+      }
       return saved;
     });
   }

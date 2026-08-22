@@ -18,6 +18,7 @@ import {
 
 const ORDERS_URL = process.env.ORDERS_URL ?? 'http://localhost:3000';
 const AUDIT_URL = process.env.AUDIT_URL ?? 'http://localhost:3001';
+const INVENTORY_URL = process.env.INVENTORY_URL ?? 'http://localhost:3002';
 const API_KEY = process.env.API_KEY ?? 'your-secret-api-key-here';
 
 const ORDER_PAYLOAD = {
@@ -43,6 +44,7 @@ const dockerAvailable = isDockerComposeAvailable();
   () => {
     let ordersApi: AxiosInstance;
     let auditApi: AxiosInstance;
+    let inventoryApi: AxiosInstance;
     let dbClient: Client;
 
     beforeAll(async () => {
@@ -56,6 +58,19 @@ const dockerAvailable = isDockerComposeAvailable();
         validateStatus: () => true,
         timeout: 8000,
       });
+      inventoryApi = axios.create({
+        baseURL: INVENTORY_URL,
+        headers: { 'x-api-key': API_KEY },
+        validateStatus: () => true,
+      });
+
+      // Gate: POST /orders now reserves stock synchronously against
+      // `inventory` before creating the order (409/503 otherwise). Seed
+      // enough stock for the item this suite's ORDER_PAYLOAD requests.
+      const seedRes = await inventoryApi.put('/stock/prod-e2e-resilience', {
+        quantity: 1000,
+      });
+      expect(seedRes.status).toBe(200);
 
       dbClient = createOutboxDbClient();
       await dbClient.connect();
@@ -120,9 +135,17 @@ const dockerAvailable = isDockerComposeAvailable();
       expect(elapsedMs).toBeLessThan(2000);
 
       // 4. The outbox event for this transition is pending in Postgres.
+      // Pinned to `order.status_changed`: CONFIRMED now also fans out an
+      // `inventory.commit_requested` row in the same transaction, and
+      // inventory (never taken down in this suite) delivers independently
+      // of audit's outage — "latest" without a type filter would race.
       const pendingRow = await waitUntil<OutboxEventRow>(
         async () => {
-          const row = await findLatestOutboxEventForOrder(dbClient, orderId);
+          const row = await findLatestOutboxEventForOrder(
+            dbClient,
+            orderId,
+            'order.status_changed',
+          );
           return row && row.status === 'pending' ? row : false;
         },
         {
@@ -157,10 +180,17 @@ const dockerAvailable = isDockerComposeAvailable();
         },
       );
 
-      // 8. Poll outbox_events until the poller marks it sent.
+      // 8. Poll outbox_events until the poller marks it sent. Same
+      // `order.status_changed` pin as step 4 — otherwise this can grab the
+      // sibling `inventory.commit_requested` row, which reaches `sent` on
+      // its own schedule and never matches the audit log's eventId below.
       const sentRow = await waitUntil<OutboxEventRow>(
         async () => {
-          const row = await findLatestOutboxEventForOrder(dbClient, orderId);
+          const row = await findLatestOutboxEventForOrder(
+            dbClient,
+            orderId,
+            'order.status_changed',
+          );
           return row && row.status === 'sent' ? row : false;
         },
         {

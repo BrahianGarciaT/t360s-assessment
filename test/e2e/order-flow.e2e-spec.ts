@@ -3,6 +3,7 @@ import { waitForAuditLogs } from './helpers/wait';
 
 const ORDERS_URL = process.env.ORDERS_URL ?? 'http://localhost:3000';
 const AUDIT_URL = process.env.AUDIT_URL ?? 'http://localhost:3001';
+const INVENTORY_URL = process.env.INVENTORY_URL ?? 'http://localhost:3002';
 const API_KEY = process.env.API_KEY ?? 'your-secret-api-key-here';
 
 const ordersApi: AxiosInstance = axios.create({
@@ -13,6 +14,12 @@ const ordersApi: AxiosInstance = axios.create({
 
 const auditApi: AxiosInstance = axios.create({
   baseURL: AUDIT_URL,
+  validateStatus: () => true,
+});
+
+const inventoryApi: AxiosInstance = axios.create({
+  baseURL: INVENTORY_URL,
+  headers: { 'x-api-key': API_KEY },
   validateStatus: () => true,
 });
 
@@ -31,6 +38,16 @@ const ORDER_PAYLOAD = {
 
 describe('Order flow (e2e)', () => {
   let orderId: string;
+
+  beforeAll(async () => {
+    // Gate: POST /orders now reserves stock synchronously against `inventory`
+    // before creating the order (409/503 otherwise). Seed enough stock for
+    // every item this suite's ORDER_PAYLOAD requests.
+    const res = await inventoryApi.put('/stock/prod-e2e-01', {
+      quantity: 1000,
+    });
+    expect(res.status).toBe(200);
+  }, 30_000);
 
   it('POST /orders — creates order with PENDING status', async () => {
     const res = await ordersApi.post('/orders', ORDER_PAYLOAD);

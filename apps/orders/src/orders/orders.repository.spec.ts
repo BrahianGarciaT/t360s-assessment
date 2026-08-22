@@ -59,7 +59,7 @@ describe('OrdersRepository', () => {
       outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
       const eventFactory = jest
         .fn()
-        .mockReturnValue({ eventType: 'order.status_changed', payload: {} });
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       const result = await repository.create(data, eventFactory);
 
@@ -72,11 +72,38 @@ describe('OrdersRepository', () => {
         [saved.id],
       );
       expect(eventFactory).toHaveBeenCalledWith(saved);
+      expect(outboxRepository.insertWithin).toHaveBeenCalledTimes(1);
       expect(outboxRepository.insertWithin).toHaveBeenCalledWith(manager, {
         eventType: 'order.status_changed',
         payload: {},
       });
       expect(result).toBe(saved);
+    });
+
+    it('inserts every event the factory returns, in order, within the same transaction (triangulation)', async () => {
+      const data = { userId: 'user-1', status: OrderStatus.PENDING };
+      const saved = buildOrder();
+      orderManagerRepo.create.mockReturnValue(data);
+      orderManagerRepo.save.mockResolvedValue(saved);
+      outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
+      const eventFactory = jest.fn().mockReturnValue([
+        { eventType: 'order.status_changed', payload: { a: 1 } },
+        { eventType: 'inventory.commit_requested', payload: { b: 2 } },
+      ]);
+
+      await repository.create(data, eventFactory);
+
+      expect(outboxRepository.insertWithin).toHaveBeenCalledTimes(2);
+      expect(outboxRepository.insertWithin).toHaveBeenNthCalledWith(
+        1,
+        manager,
+        { eventType: 'order.status_changed', payload: { a: 1 } },
+      );
+      expect(outboxRepository.insertWithin).toHaveBeenNthCalledWith(
+        2,
+        manager,
+        { eventType: 'inventory.commit_requested', payload: { b: 2 } },
+      );
     });
 
     it('rolls back the whole transaction (order is never returned) when the outbox insert fails', async () => {
@@ -89,7 +116,7 @@ describe('OrdersRepository', () => {
       );
       const eventFactory = jest
         .fn()
-        .mockReturnValue({ eventType: 'order.status_changed', payload: {} });
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       await expect(repository.create(data, eventFactory)).rejects.toThrow(
         'outbox insert failed',
@@ -107,7 +134,7 @@ describe('OrdersRepository', () => {
       outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
       const eventFactory = jest
         .fn()
-        .mockReturnValue({ eventType: 'order.status_changed', payload: {} });
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       const result = await repository.save(order, eventFactory);
 
@@ -117,11 +144,31 @@ describe('OrdersRepository', () => {
         [order.id],
       );
       expect(eventFactory).toHaveBeenCalledWith(order);
+      expect(outboxRepository.insertWithin).toHaveBeenCalledTimes(1);
       expect(outboxRepository.insertWithin).toHaveBeenCalledWith(manager, {
         eventType: 'order.status_changed',
         payload: {},
       });
       expect(result).toBe(order);
+    });
+
+    it('inserts both the order.status_changed and the inventory finalize event on a CONFIRMED transition (triangulation)', async () => {
+      const order = buildOrder({ status: OrderStatus.CONFIRMED });
+      orderManagerRepo.save.mockResolvedValue(order);
+      outboxRepository.insertWithin.mockResolvedValue({} as OutboxEvent);
+      const eventFactory = jest.fn().mockReturnValue([
+        { eventType: 'order.status_changed', payload: {} },
+        { eventType: 'inventory.commit_requested', payload: {} },
+      ]);
+
+      await repository.save(order, eventFactory);
+
+      expect(outboxRepository.insertWithin).toHaveBeenCalledTimes(2);
+      expect(outboxRepository.insertWithin).toHaveBeenNthCalledWith(
+        2,
+        manager,
+        { eventType: 'inventory.commit_requested', payload: {} },
+      );
     });
 
     it('rolls back the whole transaction when the outbox insert fails on a status update (triangulation)', async () => {
@@ -132,7 +179,7 @@ describe('OrdersRepository', () => {
       );
       const eventFactory = jest
         .fn()
-        .mockReturnValue({ eventType: 'order.status_changed', payload: {} });
+        .mockReturnValue([{ eventType: 'order.status_changed', payload: {} }]);
 
       await expect(repository.save(order, eventFactory)).rejects.toThrow(
         'outbox insert failed',

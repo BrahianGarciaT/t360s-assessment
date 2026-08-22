@@ -27,6 +27,22 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-inventory:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${INVENTORY_DB_USER}
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASSWORD}
+      POSTGRES_DB: ${INVENTORY_DB_NAME}
+    ports:
+      - '5433:5432'
+    networks:
+      - app-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${INVENTORY_DB_USER} -d ${INVENTORY_DB_NAME}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   orders:
     build:
       context: .
@@ -40,6 +56,9 @@ services:
       ORDERS_DB_NAME: ${ORDERS_DB_NAME}
       AUDIT_TCP_HOST: ${AUDIT_TCP_HOST}
       AUDIT_TCP_PORT: ${AUDIT_TCP_PORT}
+      INVENTORY_TCP_HOST: ${INVENTORY_TCP_HOST}
+      INVENTORY_TCP_PORT: ${INVENTORY_TCP_PORT}
+      INVENTORY_SEND_TIMEOUT_MS: ${INVENTORY_SEND_TIMEOUT_MS}
       API_KEY: ${API_KEY}
       THROTTLE_TTL: ${THROTTLE_TTL}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT}
@@ -59,6 +78,8 @@ services:
         condition: service_healthy
       audit:
         condition: service_healthy
+      inventory:
+        condition: service_healthy
     healthcheck:
       test:
         - 'CMD'
@@ -66,6 +87,41 @@ services:
         - '-e'
         - |
           require('http').get('http://localhost:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  inventory:
+    build:
+      context: .
+      dockerfile: apps/inventory/Dockerfile
+    environment:
+      INVENTORY_HTTP_PORT: ${INVENTORY_HTTP_PORT}
+      INVENTORY_TCP_PORT: ${INVENTORY_TCP_PORT}
+      INVENTORY_DB_HOST: ${INVENTORY_DB_HOST}
+      INVENTORY_DB_PORT: ${INVENTORY_DB_PORT}
+      INVENTORY_DB_USER: ${INVENTORY_DB_USER}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD}
+      INVENTORY_DB_NAME: ${INVENTORY_DB_NAME}
+      INVENTORY_RESERVATION_TTL_MINUTES: ${INVENTORY_RESERVATION_TTL_MINUTES}
+      INVENTORY_REAP_BATCH_SIZE: ${INVENTORY_REAP_BATCH_SIZE}
+      API_KEY: ${API_KEY}
+    ports:
+      - '3002:3002'
+      - '4002:4002'
+    networks:
+      - app-network
+    depends_on:
+      postgres-inventory:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - 'CMD'
+        - 'node'
+        - '-e'
+        - |
+          require('http').get('http://localhost:3002/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));
       interval: 15s
       timeout: 10s
       retries: 5

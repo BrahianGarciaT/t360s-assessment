@@ -12,7 +12,7 @@ import { OutboxPollerService } from './outbox-poller.service';
 import { OutboxPurgeService } from './outbox-purge.service';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
-import { AUDIT_TCP_CLIENT } from './orders.constants';
+import { AUDIT_TCP_CLIENT, INVENTORY_TCP_CLIENT } from './orders.constants';
 
 @Module({
   imports: [
@@ -27,6 +27,18 @@ import { AUDIT_TCP_CLIENT } from './orders.constants';
           options: {
             host: configService.get<string>('AUDIT_TCP_HOST'),
             port: configService.get<number>('AUDIT_TCP_PORT'),
+          },
+        }),
+        inject: [ConfigService],
+      },
+      {
+        name: INVENTORY_TCP_CLIENT,
+        imports: [ConfigModule],
+        useFactory: (configService: ConfigService) => ({
+          transport: Transport.TCP,
+          options: {
+            host: configService.get<string>('INVENTORY_TCP_HOST'),
+            port: configService.get<number>('INVENTORY_TCP_PORT'),
           },
         }),
         inject: [ConfigService],

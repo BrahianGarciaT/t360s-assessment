@@ -31,18 +31,26 @@ export function createOutboxDbClient(): Client {
  * Latest `outbox_events` row for a given orderId. TypeORM's default naming
  * strategy keeps camelCase column names verbatim (no snake_case
  * transformation), hence the quoted `"createdAt"` identifier.
+ *
+ * A single order transition can now fan out to more than one outbox row
+ * (e.g. `order.status_changed` plus an `inventory.*` finalize event on
+ * CONFIRMED/CANCELLED). Pass `eventType` to pin the query to one of them —
+ * without it, "latest" is ambiguous between sibling rows inserted in the
+ * same transaction and delivered independently.
  */
 export async function findLatestOutboxEventForOrder(
   client: Client,
   orderId: string,
+  eventType?: string,
 ): Promise<OutboxEventRow | null> {
   const result = await client.query<OutboxEventRow>(
     `SELECT id, status, attempts
      FROM outbox_events
      WHERE payload ->> 'orderId' = $1
+       AND ($2::text IS NULL OR "eventType" = $2)
      ORDER BY "createdAt" DESC
      LIMIT 1`,
-    [orderId],
+    [orderId, eventType ?? null],
   );
   return result.rows[0] ?? null;
 }
