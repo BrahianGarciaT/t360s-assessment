@@ -75,8 +75,11 @@ describe('InventoryRepository', () => {
 
   describe('reserve', () => {
     it('sums duplicate productIds and applies conditional UPDATEs sorted by productId ASC', async () => {
+      // TypeORM's Postgres driver returns `manager.query()` results for a
+      // non-SELECT statement as a `[rows, affectedRowCount]` tuple, not a
+      // bare rows array — every mock below must match that real shape.
       // two lines for the SAME productId, plus a second product that sorts first
-      manager.query.mockResolvedValue([{ productId: 'irrelevant' }]);
+      manager.query.mockResolvedValue([[{ productId: 'irrelevant' }], 1]);
       reservationManagerRepo.save.mockImplementation((v) => v);
 
       const result = await repository.reserve(
@@ -117,7 +120,7 @@ describe('InventoryRepository', () => {
     });
 
     it('rejects with INSUFFICIENT_STOCK and rolls back when the conditional UPDATE affects zero rows', async () => {
-      manager.query.mockResolvedValueOnce([]); // affected === 0 -> shortfall path
+      manager.query.mockResolvedValueOnce([[], 0]); // affected === 0 -> shortfall path
       stockManagerRepo.findOne.mockResolvedValue({
         productId: 'p1',
         quantity: 5,
@@ -137,8 +140,8 @@ describe('InventoryRepository', () => {
     it('rolls back the WHOLE transaction (no reservation saved) when only one item among several lacks stock', async () => {
       // first item (sorted first) succeeds, second item fails -> whole tx must reject
       manager.query
-        .mockResolvedValueOnce([{ productId: 'apple' }]) // apple succeeds
-        .mockResolvedValueOnce([]); // zebra fails
+        .mockResolvedValueOnce([[{ productId: 'apple' }], 1]) // apple succeeds
+        .mockResolvedValueOnce([[], 0]); // zebra fails
       stockManagerRepo.findOne.mockResolvedValue({
         productId: 'zebra',
         quantity: 2,
@@ -165,7 +168,7 @@ describe('InventoryRepository', () => {
     });
 
     it('rejects with UNKNOWN_PRODUCT when no stock_items row exists for the productId', async () => {
-      manager.query.mockResolvedValueOnce([]);
+      manager.query.mockResolvedValueOnce([[], 0]);
       stockManagerRepo.findOne.mockResolvedValue(null);
 
       let caught: unknown;

@@ -1,13 +1,14 @@
 # Orders Audit System
 
-Sistema de gestión de órdenes compuesto por dos microservicios NestJS que se comunican entre sí vía TCP: uno gestiona el ciclo de vida de las órdenes sobre PostgreSQL, el otro mantiene un log de auditoría inmutable en MongoDB ante cada cambio de estado.
+Sistema de gestión de órdenes compuesto por tres microservicios NestJS que se comunican entre sí vía TCP: uno gestiona el ciclo de vida de las órdenes sobre PostgreSQL, otro reserva y compensa stock sobre su propio PostgreSQL, y el tercero mantiene un log de auditoría inmutable en MongoDB ante cada cambio de estado.
 
-Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura de microservicios en NestJS: comunicación TCP entre servicios, full-text search nativo de PostgreSQL, un repository pattern desacoplado del ORM, y documentación de API con Swagger — todo corriendo con Docker Compose sin dependencias externas.
+Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura de microservicios en NestJS: comunicación TCP entre servicios, full-text search nativo de PostgreSQL, un repository pattern desacoplado del ORM, un gate de reserva de stock que resuelve consistencia distribuida sin 2PC/saga, y documentación de API con Swagger — todo corriendo con Docker Compose sin dependencias externas.
 
 ### Features
 
 - CRUD de órdenes con validación de items y cálculo automático de `totalAmount`
 - Máquina de estados con transiciones válidas (`PENDING → CONFIRMED → SHIPPED → DELIVERED`, con `CANCELLED` como salida)
+- Gate de reserva de stock síncrono: `POST /orders` reserva contra `inventory` antes de crear la orden, con `409`/`503` y compensación por TTL (ver [§2](#2-un-servicio-inventory-real-con-gate-de-reserva-síncrono))
 - Búsqueda full-text sobre órdenes (PostgreSQL `tsvector` + índice GIN)
 - Log de auditoría inmutable en MongoDB, poblado automáticamente vía eventos TCP
 - Autenticación por API key y rate limiting en el servicio de órdenes
@@ -25,6 +26,7 @@ Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura
 | ORM (orders) | TypeORM |
 | ODM (audit) | Mongoose |
 | DB orders | PostgreSQL 18 |
+| DB inventory | PostgreSQL 18 (base propia, separada de orders) |
 | DB audit | MongoDB 8 |
 | Comunicación inter-servicios | NestJS TCP transport |
 | Contenedores | Docker + docker-compose |
@@ -35,14 +37,25 @@ Es un proyecto personal pensado para explorar y mostrar patrones de arquitectura
 ## Arquitectura
 
 ```
-┌─────────────────────────────┐        TCP :4001               ┌──────────────────────────────┐
-│   orders  (HTTP :3000)      │ ──── order.status_changed ───▶ │   audit  (HTTP :3001)        │
-│   NestJS + PostgreSQL       │                                │   NestJS + MongoDB           │
-└─────────────────────────────┘                                └──────────────────────────────┘
+POST /orders
+  │
+  ▼
+┌────────────────────────────┐   TCP :4002, síncrono    ┌──────────────────────────────┐
+│   orders  (HTTP :3000)     │ ──── inventory.reserve ─▶ │   inventory  (HTTP :3002)    │
+│   NestJS + PostgreSQL      │ ◀── ok / 409 / 503 ─────  │   NestJS + PostgreSQL propio │
+└────────────────────────────┘                           └──────────────────────────────┘
+  │
+  │ outbox transaccional (async, vía poller)
+  ├── order.status_changed ──────────────────────────▶  ┌──────────────────────────────┐
+  │   TCP :4001                                          │   audit  (HTTP :3001)        │
+  │                                                       │   NestJS + MongoDB           │
+  └── inventory.commit_requested /                        └──────────────────────────────┘
+      inventory.release_requested ──────────────────▶  inventory (TCP :4002)
 ```
 
-- **orders** gestiona el ciclo de vida de las órdenes. Tras cada cambio de estado emite un evento TCP al servicio audit.
-- **audit** escucha esos eventos y persiste un log inmutable en MongoDB. Expone un endpoint HTTP para consultar el historial de una orden.
+- **orders** gestiona el ciclo de vida de las órdenes. Antes de crear una orden, reserva stock síncronamente contra `inventory`. Tras cada cambio de estado, escribe en su outbox transaccional los eventos que correspondan (`order.status_changed` siempre; `inventory.commit_requested`/`inventory.release_requested` en `CONFIRMED`/`CANCELLED`), que un poller entrega de forma asíncrona.
+- **inventory** posee las cantidades de stock por `productId` (sin catálogo de productos) y las reservas asociadas a cada orden. Ver [§2](#2-un-servicio-inventory-real-con-gate-de-reserva-síncrono) para el detalle completo del flujo.
+- **audit** escucha los eventos `order.status_changed` y persiste un log inmutable en MongoDB. Expone un endpoint HTTP para consultar el historial de una orden.
 
 ---
 
@@ -77,23 +90,25 @@ docker-compose up --build
 ```
 
 Los servicios arrancan en este orden:
-1. PostgreSQL y MongoDB (con healthcheck)
-2. `audit` (espera a que Mongo esté healthy)
-3. `orders` (espera a que Postgres y `audit` estén healthy)
+1. PostgreSQL (orders), PostgreSQL (inventory) y MongoDB (con healthcheck)
+2. `audit` (espera a que Mongo esté healthy) e `inventory` (espera a que su Postgres esté healthy), en paralelo
+3. `orders` (espera a que su Postgres, `audit` e `inventory` estén healthy)
 
 Una vez levantado:
 - **orders** → `http://localhost:3000`
+- **inventory** → `http://localhost:3002`
 - **audit** → `http://localhost:3001`
 
 ### Solo las bases de datos (útil en desarrollo local)
 
 ```bash
-docker-compose up postgres mongo
+docker-compose up postgres postgres-inventory mongo
 ```
 
 ```bash
 # En terminales separadas
 npm run start:dev orders
+npm run start:dev inventory
 npm run start:dev audit
 ```
 
@@ -158,6 +173,27 @@ GET /health
 ```
 Chequea la conexión a MongoDB (`MongooseHealthIndicator`) y reporta la causa cuando el servicio no está saludable.
 
+### inventory — `http://localhost:3002`
+
+Fixture/demo seam para fijar y consultar stock — no es una API de reabastecimiento. Requiere `x-api-key` (mismo guard que `orders`). Ver [§2](#2-un-servicio-inventory-real-con-gate-de-reserva-síncrono) para el flujo completo de reserva.
+
+```bash
+# Fijar (upsert idempotente) la cantidad total en stock de un producto
+curl -X PUT http://localhost:3002/stock/prod-1 \
+  -H "x-api-key: tu-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"quantity": 100}'
+
+# Consultar el stock actual de un producto
+curl -H "x-api-key: tu-api-key" http://localhost:3002/stock/prod-1
+```
+
+#### Healthcheck
+```
+GET /health
+```
+Chequea la conexión a PostgreSQL (`TypeOrmHealthIndicator`), sin `x-api-key`.
+
 ---
 
 ## Documentación de la API (Swagger)
@@ -166,8 +202,9 @@ Cada servicio expone su propio Swagger UI, generado automáticamente a partir de
 
 - **orders** → `http://localhost:3000/api`
 - **audit** → `http://localhost:3001/api`
+- **inventory** → `http://localhost:3002/api`
 
-En orders, el Swagger UI incluye el esquema de seguridad `x-api-key` — podés autenticarte desde ahí con el botón "Authorize" para probar los endpoints directamente.
+En orders e inventory, el Swagger UI incluye el esquema de seguridad `x-api-key` — podés autenticarte desde ahí con el botón "Authorize" para probar los endpoints directamente.
 
 ---
 
@@ -340,6 +377,17 @@ THROTTLE_LIMIT=50
 | `OUTBOX_BACKOFF_BASE_MS` | Backoff base entre reintentos, en ms (exponencial) | `1000` |
 | `OUTBOX_BACKOFF_MAX_MS` | Techo del backoff exponencial, en ms | `60000` |
 | `OUTBOX_PURGE_RETENTION_DAYS` | Días que se conserva una fila `sent` de `outbox_events` antes de purgarla | `30` |
+| `INVENTORY_HTTP_PORT` | Puerto HTTP del servicio inventory | `3002` |
+| `INVENTORY_TCP_PORT` | Puerto TCP del servicio inventory | `4002` |
+| `INVENTORY_DB_HOST` | Host de PostgreSQL de inventory | `postgres-inventory` |
+| `INVENTORY_DB_PORT` | Puerto de PostgreSQL de inventory | `5432` |
+| `INVENTORY_DB_USER` | Usuario de PostgreSQL de inventory | `inventory_user` |
+| `INVENTORY_DB_PASSWORD` | Contraseña de PostgreSQL de inventory | `inventory_pass` |
+| `INVENTORY_DB_NAME` | Nombre de la base de datos de inventory | `inventory_db` |
+| `INVENTORY_RESERVATION_TTL_MINUTES` | Minutos antes de que una reserva `held` sin confirmar/cancelar expire y se libere sola | `15` |
+| `INVENTORY_REAP_BATCH_SIZE` | Máximo de reservas expiradas liberadas por tick del reaper | `100` |
+| `INVENTORY_TCP_HOST` | Host del servicio inventory (para TCP, usado por orders) | `inventory` |
+| `INVENTORY_SEND_TIMEOUT_MS` | Timeout del `send()` TCP síncrono de orders hacia inventory al crear una orden, en ms | `3000` |
 
 ---
 
@@ -348,8 +396,56 @@ THROTTLE_LIMIT=50
 ### 1. TCP sobre EventEmitter
 Los servicios corren en contenedores separados. `EventEmitter` de NestJS es in-process y no funcionaría entre contenedores. Se usa el transport TCP nativo de `@nestjs/microservices`.
 
-### 2. Validación de quantity en lugar de un campo stock
-Se optó por no agregar un campo `stock` a la entidad `Order` porque no tiene sentido semántico en el contexto de una orden: una orden no tiene stock propio, sino items con cantidades. La validación equivalente y semánticamente correcta es `quantity ≥ 1` por cada item, implementada en el DTO con `@Min(1)`.
+### 2. Un servicio `inventory` real, con gate de reserva síncrono
+
+La decisión original de este proyecto fue no modelar stock en absoluto: `Order` solo valida `quantity ≥ 1` por item (`@Min(1)` en el DTO), sin ningún campo de inventario. Esa decisión se revirtió deliberadamente — no porque estuviera mal en su momento (una orden, en efecto, no tiene "stock propio"), sino porque evitaba por completo el problema interesante: **coordinar una operación que abarca dos bases de datos sin una transacción distribuida.** Este es el diferencial de portfolio de este proyecto: resolver esa coordinación con un patrón explícito y acotado (reserva + outbox + TTL), en vez de con 2PC o un orquestador de sagas.
+
+#### Qué posee `inventory`
+
+Un tercer microservicio NestJS, base de datos PostgreSQL propia (`postgres-inventory`, separada de `orders`), con dos tablas:
+
+- **`stock_items`** — cantidad total por `productId` y cuánto de esa cantidad está `reserved`. La disponibilidad (`quantity - reserved`) nunca se almacena, siempre se deriva.
+- **`reservations`** — una reserva por orden (`orderId` como PK, también su clave de idempotencia), con los items reservados, su estado (`held` / `committed` / `released`) y su vencimiento (`expiresAt`).
+
+`inventory` **no** es un catálogo de productos ni una API de reabastecimiento: no hay nombres, precios, ni endpoints de recepción de mercadería. `PUT /stock/:productId` es un fixture de pruebas para fijar cantidades (usado por el seed de los tests e2e y para probar el flujo manualmente), no una operación de negocio.
+
+#### El flujo: gate síncrono, compensación asíncrona
+
+```
+POST /orders
+  │
+  ├─▶ inventory.reserve (TCP, síncrono, antes de crear la orden)
+  │     ├─ stock insuficiente en algún item ──▶ 409 Conflict, sin crear la orden
+  │     └─ inventory caído / timeout ──────────▶ 503 Service Unavailable, sin crear la orden
+  │
+  └─▶ orden creada (PENDING) — solo si la reserva fue exitosa
+
+PUT /orders/:id/status { CONFIRMED }  ──▶ outbox: inventory.commit_requested
+                                             └─▶ inventory: reserva pasa a committed, stock se decrementa
+
+PUT /orders/:id/status { CANCELLED }  ──▶ outbox: inventory.release_requested
+                                             └─▶ inventory: reserva pasa a released, se libera lo reservado
+
+(orden nunca confirmada ni cancelada) ──▶ reaper (@Cron, cada minuto) libera la reserva
+                                            al vencer su TTL (INVENTORY_RESERVATION_TTL_MINUTES, default 15)
+```
+
+La reserva es **síncrona y bloqueante**: `POST /orders` no crea ninguna fila hasta que `inventory` confirma que hay stock para *todos* los items — todo o nada, nunca una reserva parcial. Una vez creada la orden, el commit/release en `CONFIRMED`/`CANCELLED` viaja por el mismo outbox transaccional que ya usa `order.status_changed` (ver [punto 7](#7-entrega-confiable-de-eventos-vía-outbox-transaccional)): la fila de outbox se escribe en la misma transacción que el cambio de estado, así que ambos son todo-o-nada.
+
+#### Por qué no hay una transacción distribuida
+
+`orders` no puede abrir una transacción de Postgres que abarque la base de datos de `inventory` sin XA (fuera de alcance de este proyecto), y mantener la transacción de `orders` abierta mientras espera una llamada TCP con timeout de 3s fijaría una conexión del pool por cada orden en vuelo. Por eso la reserva ocurre *antes* y *fuera* de la transacción de `orders`: el costo aceptado es una ventana entre "reservado en `inventory`" y "orden confirmada en `orders`", acotada por el TTL de la reserva (15 minutos por defecto — el ciclo reserva→commit real dura menos de un segundo, así que ese margen jamás mata una orden legítima; es la ventana estándar de un checkout humano).
+
+Si una orden queda `PENDING` para siempre (el cliente nunca confirma ni cancela), la reserva no queda bloqueando stock indefinidamente: el reaper la libera sola al vencer el TTL. Es la red de seguridad de compensación de todo este diseño — sin ella, un cliente que abandona el checkout dejaría stock reservado y jamás disponible de nuevo.
+
+#### Semántica HTTP
+
+| Resultado de `inventory.reserve` | HTTP |
+|---|---|
+| Stock insuficiente en uno o más items (`INSUFFICIENT_STOCK`) o `productId` desconocido (`UNKNOWN_PRODUCT`) | `409 Conflict` — el body incluye `reason` y `shortfalls[]` |
+| `inventory` no responde o el timeout se cumple (`INVENTORY_SEND_TIMEOUT_MS`, default 3000ms) | `503 Service Unavailable` — el sistema nunca degrada abierto: prefiere rechazar la orden antes que crearla sin garantía de stock |
+
+Ver `test/e2e/inventory-reservation.e2e-spec.ts` para la prueba end-to-end de los cinco escenarios: stock insuficiente, `inventory` caído, commit en `CONFIRMED`, release en `CANCELLED` y auto-liberación por TTL.
 
 ### 3. Repository pattern
 El servicio no accede directamente a TypeORM — delega en una clase `OrdersRepository` propia. Esto desacopla la lógica de negocio del ORM y facilita el testing.
@@ -452,3 +548,17 @@ Suite separada que corre después de `order-flow.e2e-spec.ts` (orden alfabético
 6. Verifica que existe exactamente un `AuditLog` para esa transición, con `eventId` igual al id de la fila de `outbox_events` (entrega + deduplicación en una sola aserción).
 
 Si el CLI de `docker compose` no está disponible en el entorno donde corre `npm run test:e2e`, la suite se salta automáticamente (`describe.skip`) en vez de fallar.
+
+### Prueba del gate de reserva de inventory (`inventory-reservation.e2e-spec.ts`)
+
+Corre primero alfabéticamente (`inventory-reservation` < `order-flow` < `outbox-resilience`), así que su escenario de caída de `inventory` siempre se restaura antes de que las siguientes suites, que también dependen de `inventory` para su propio seed de stock, se ejecuten. Cubre los cinco escenarios del [gate de reserva síncrono](#2-un-servicio-inventory-real-con-gate-de-reserva-síncrono):
+
+| # | Caso |
+|---|------|
+| 1 | Stock insuficiente → `409 Conflict`, cero filas de orden creadas (verificado con una consulta directa a `orders` por `userId`) |
+| 2 | `inventory` caído (`docker compose stop inventory`) → `503 Service Unavailable`, cero filas de orden creadas |
+| 3 | `CONFIRMED` → la reserva pasa a `committed` y el stock se decrementa realmente (`quantity` baja, `reserved` vuelve a 0) |
+| 4 | `CANCELLED` → la reserva pasa a `released` (`reserved` vuelve a 0, `quantity` no cambia) |
+| 5 | Reserva nunca confirmada ni cancelada → el reaper la auto-libera al vencer su TTL, y el stock liberado queda disponible para una orden nueva |
+
+El escenario 5 fuerza el vencimiento de la reserva escribiendo directamente `expiresAt` en el pasado vía una conexión de `pg` a `postgres-inventory` (`forceExpireReservation` en `test/e2e/helpers/inventory-db.ts`), en vez de dormir los 15 minutos reales del TTL por defecto — `INVENTORY_RESERVATION_TTL_MINUTES` se lee una sola vez al arrancar el contenedor `inventory`, así que no hay forma de sobreescribirlo por test sin reiniciarlo.

@@ -54,3 +54,21 @@ export async function findLatestOutboxEventForOrder(
   );
   return result.rows[0] ?? null;
 }
+
+/**
+ * Counts `orders` rows for a given `userId` — used to prove a rejected
+ * `POST /orders` (409 insufficient stock, 503 inventory unreachable)
+ * never created an order row, without relying on the paginated
+ * `GET /orders` listing (which mixes in rows from every other e2e test).
+ * Each spec uses a unique `userId` per scenario, so this is exact.
+ */
+export async function countOrdersByUserId(
+  client: Client,
+  userId: string,
+): Promise<number> {
+  const result = await client.query<{ count: string }>(
+    `SELECT count(*)::int AS count FROM orders WHERE "userId" = $1`,
+    [userId],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}

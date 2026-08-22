@@ -50,7 +50,14 @@ export class InventoryRepository {
 
     return this.dataSource.transaction(async (manager) => {
       for (const item of items) {
-        const rows: unknown[] = await manager.query(
+        // TypeORM's Postgres driver returns a non-SELECT `manager.query()`
+        // result as a `[rows, affectedRowCount]` tuple, not a bare rows
+        // array — destructuring `rows` here (not the tuple itself) is
+        // required, otherwise `rows.length` reads the tuple's own length
+        // (always 2) instead of how many rows the conditional UPDATE
+        // actually matched, silently defeating the oversell-prevention
+        // gate for every reservation, regardless of real availability.
+        const [rows]: [unknown[], number] = await manager.query(
           `UPDATE stock_items
              SET reserved = reserved + $1
              WHERE "productId" = $2 AND (quantity - reserved) >= $1
