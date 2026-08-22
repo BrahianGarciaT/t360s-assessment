@@ -18,9 +18,9 @@ function parseIntEnv(value: string | undefined, fallback: number): number {
 }
 
 /**
- * Builds the inventory reservation configuration from environment
- * variables, falling back to the documented defaults for missing or
- * invalid values. Clone of `getOutboxConfig()` (`outbox.constants.ts`).
+ * Construye la configuración de reservas de inventario a partir de variables
+ * de entorno, usando como respaldo los valores por defecto documentados cuando
+ * faltan o son inválidos. Es una copia de `getOutboxConfig()` (`outbox.constants.ts`).
  */
 export function getInventoryConfig(
   env: NodeJS.ProcessEnv = process.env,
