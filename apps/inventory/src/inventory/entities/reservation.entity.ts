@@ -47,6 +47,19 @@ export class Reservation {
   @Column({ type: 'varchar', length: 16, nullable: true })
   releasedReason!: ReleasedReason | null;
 
+  /**
+   * The `eventId` of the finalize/release event that last transitioned this
+   * reservation out of `held` — mirrors `AuditLog.eventId`'s unique-key dedup
+   * pattern (`audit.service.ts`'s Mongo 11000 catch), scoped to Postgres via
+   * a unique index. A reservation's lifecycle is linear (reserve → exactly
+   * one commit-or-release event), so one column is enough to key dedup off
+   * the real `eventId`, not just `status`. Nullable because a `held`
+   * reservation has not been finalized yet.
+   */
+  @Index('IDX_RESERVATION_PROCESSED_EVENT_ID', { unique: true })
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  processedEventId!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

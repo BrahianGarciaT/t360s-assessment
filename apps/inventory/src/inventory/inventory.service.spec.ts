@@ -138,58 +138,84 @@ describe('InventoryService', () => {
   });
 
   describe('commit', () => {
-    it('acks ok:true after finalizing a held reservation', async () => {
+    it('acks ok:true after finalizing a held reservation, forwarding the eventId for dedup', async () => {
       repository.finalize.mockResolvedValue(
-        buildReservation({ status: ReservationStatus.COMMITTED }),
+        buildReservation({
+          status: ReservationStatus.COMMITTED,
+          processedEventId: 'event-abc',
+        }),
       );
 
-      const result = await service.commit('order-1');
+      const result = await service.commit('order-1', 'event-abc');
 
-      expect(repository.finalize).toHaveBeenCalledWith('order-1', 'commit');
+      expect(repository.finalize).toHaveBeenCalledWith(
+        'order-1',
+        'commit',
+        'event-abc',
+      );
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
 
-    it('is a no-op ack when the reservation is already in a terminal state (idempotent redelivery)', async () => {
+    it('is a no-op ack when the redelivered eventId was already processed (idempotent redelivery, triangulation)', async () => {
       repository.finalize.mockResolvedValue(
-        buildReservation({ status: ReservationStatus.COMMITTED }),
+        buildReservation({
+          status: ReservationStatus.COMMITTED,
+          processedEventId: 'event-abc',
+        }),
       );
 
-      const result = await service.commit('order-1');
+      const result = await service.commit('order-1', 'event-abc');
 
+      expect(repository.finalize).toHaveBeenCalledWith(
+        'order-1',
+        'commit',
+        'event-abc',
+      );
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
 
     it('is a no-op ack when no reservation exists for the orderId (unknown reservation)', async () => {
       repository.finalize.mockResolvedValue(null);
 
-      const result = await service.commit('order-1');
+      const result = await service.commit('order-1', 'event-abc');
 
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
   });
 
   describe('release', () => {
-    it('acks ok:true after releasing a held reservation with the given reason', async () => {
+    it('acks ok:true after releasing a held reservation with the given reason and eventId', async () => {
       repository.finalize.mockResolvedValue(
-        buildReservation({ status: ReservationStatus.RELEASED }),
+        buildReservation({
+          status: ReservationStatus.RELEASED,
+          processedEventId: 'event-xyz',
+        }),
       );
 
-      const result = await service.release('order-1', 'cancelled');
+      const result = await service.release('order-1', 'event-xyz', 'cancelled');
 
       expect(repository.finalize).toHaveBeenCalledWith(
         'order-1',
         'release',
+        'event-xyz',
         'cancelled',
       );
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });
 
-    it('is a no-op ack when the reservation is already released (idempotent redelivery)', async () => {
+    it('is a no-op ack when the reservation is already released under this eventId (idempotent redelivery)', async () => {
       repository.finalize.mockResolvedValue(
-        buildReservation({ status: ReservationStatus.RELEASED }),
+        buildReservation({
+          status: ReservationStatus.RELEASED,
+          processedEventId: 'event-expired-1',
+        }),
       );
 
-      const result = await service.release('order-1', 'expired');
+      const result = await service.release(
+        'order-1',
+        'event-expired-1',
+        'expired',
+      );
 
       expect(result).toEqual({ ok: true, orderId: 'order-1' });
     });

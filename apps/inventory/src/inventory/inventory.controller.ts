@@ -50,7 +50,7 @@ export class InventoryController {
       'Received inventory.commit_requested event',
     );
 
-    return this.inventoryService.commit(event.orderId);
+    return this.inventoryService.commit(event.orderId, event.eventId);
   }
 
   @MessagePattern(INVENTORY_PATTERNS.RELEASE)
@@ -68,7 +68,11 @@ export class InventoryController {
 
     // Only order cancellation drives this pattern from orders; TTL expiry is
     // released internally by the reaper, never over this TCP pattern.
-    return this.inventoryService.release(event.orderId, 'cancelled');
+    return this.inventoryService.release(
+      event.orderId,
+      event.eventId,
+      'cancelled',
+    );
   }
 
   @Put(':productId')

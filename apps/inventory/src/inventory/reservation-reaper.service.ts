@@ -29,9 +29,16 @@ export class ReservationReaperService {
     );
 
     for (const reservation of expired) {
+      // The reaper is an internal @Cron trigger, not a redelivered outbox
+      // event, so there is no real `eventId` to forward. Synthesize one so
+      // this call satisfies finalize()'s eventId-keyed dedup contract the
+      // same way a real event would — deterministic and unique per
+      // reservation, since claimExpired only ever returns a HELD reservation
+      // once (it stops matching the HELD filter as soon as it is released).
       await this.inventoryRepository.finalize(
         reservation.orderId,
         'release',
+        `internal:reaper:${reservation.orderId}`,
         'expired',
       );
     }
