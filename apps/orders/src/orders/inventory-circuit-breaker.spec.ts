@@ -180,4 +180,119 @@ describe('InventoryCircuitBreaker', () => {
       );
     });
   });
+
+  describe('multi-instance isolation (per-replica state, no shared store)', () => {
+    it('does not share state between two independent instances', async () => {
+      const loggerA = { warn: jest.fn(), info: jest.fn(), error: jest.fn() };
+      const loggerB = { warn: jest.fn(), info: jest.fn(), error: jest.fn() };
+      const breakerA = new InventoryCircuitBreaker(
+        loggerA as unknown as PinoLogger,
+      );
+      const breakerB = new InventoryCircuitBreaker(
+        loggerB as unknown as PinoLogger,
+      );
+
+      const failingOperation = jest
+        .fn()
+        .mockRejectedValue(new Error('ECONNREFUSED'));
+      for (let i = 0; i < 5; i += 1) {
+        await expect(breakerA.execute(failingOperation)).rejects.toThrow(
+          'ECONNREFUSED',
+        );
+      }
+
+      // breakerA is now open — the 6th call must short-circuit without
+      // invoking the operation.
+      failingOperation.mockClear();
+      await expect(breakerA.execute(failingOperation)).rejects.toThrow(
+        CircuitOpenError,
+      );
+      expect(failingOperation).not.toHaveBeenCalled();
+
+      // breakerB is a fully independent instance that never saw a failure.
+      // If any state (module-level, static, or otherwise shared) leaked
+      // from breakerA, this call would also short-circuit. It must remain
+      // closed and invoke the operation normally.
+      const succeedingOperation = jest.fn().mockResolvedValue('reserved');
+      await expect(breakerB.execute(succeedingOperation)).resolves.toBe(
+        'reserved',
+      );
+      expect(succeedingOperation).toHaveBeenCalledTimes(1);
+      expect(loggerB.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('audit isolation (transition never reaches audit trail)', () => {
+    it('has no audit-shaped dependency in its constructor and no audit-shaped public method', () => {
+      // The constructor accepts exactly one dependency: the injected
+      // PinoLogger. `OutboxPollerService` is the only class in this codebase
+      // that injects `AUDIT_TCP_CLIENT` (see orders.constants.ts /
+      // outbox-poller.service.ts) — InventoryCircuitBreaker does not. If an
+      // audit-shaped dependency were ever added to this constructor, this
+      // arity check breaks immediately and forces a design review.
+      expect(InventoryCircuitBreaker.length).toBe(1);
+
+      // TS `private` is compile-time only, so this also covers every
+      // internal transition method (`admit`, `tripOpen`, etc.), not just the
+      // public `execute()` surface.
+      const allMembers = Object.getOwnPropertyNames(
+        InventoryCircuitBreaker.prototype,
+      ).filter((name) => name !== 'constructor');
+
+      expect(allMembers).toContain('execute');
+      expect(allMembers.some((name) => /audit|mongo/i.test(name))).toBe(
+        false,
+      );
+    });
+
+    it('never touches anything beyond the injected logger across a full transition sweep', async () => {
+      // Sweep: closed -> open (threshold) -> half-open (reset timeout
+      // elapses) -> open again (failed trial) -> half-open -> closed
+      // (successful trial). `logger` is the ONLY collaborator this instance
+      // was constructed with, so asserting its calls never reference
+      // anything audit-shaped is the strongest coupling check available
+      // given the real DI graph — there is no audit client to spy on
+      // because none is injected.
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
+      try {
+        jest.setSystemTime(0);
+        const failing = jest
+          .fn()
+          .mockRejectedValue(new Error('ECONNREFUSED'));
+        for (let i = 0; i < 5; i += 1) {
+          await expect(breaker.execute(failing)).rejects.toThrow(
+            'ECONNREFUSED',
+          );
+        }
+
+        jest.setSystemTime(15_000);
+        const failingTrial = jest
+          .fn()
+          .mockRejectedValue(new Error('ECONNREFUSED'));
+        await expect(breaker.execute(failingTrial)).rejects.toThrow(
+          'ECONNREFUSED',
+        );
+
+        jest.setSystemTime(30_000);
+        const succeedingTrial = jest.fn().mockResolvedValue('reserved');
+        await expect(breaker.execute(succeedingTrial)).resolves.toBe(
+          'reserved',
+        );
+
+        expect(logger.error).not.toHaveBeenCalled();
+        const totalLogCalls =
+          logger.warn.mock.calls.length + logger.info.mock.calls.length;
+        expect(totalLogCalls).toBeGreaterThan(0);
+
+        const serializedLogPayloads = JSON.stringify([
+          ...logger.warn.mock.calls,
+          ...logger.info.mock.calls,
+        ]);
+        expect(serializedLogPayloads.toLowerCase()).not.toContain('audit');
+        expect(serializedLogPayloads.toLowerCase()).not.toContain('mongo');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
 });
