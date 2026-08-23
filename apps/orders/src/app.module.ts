@@ -7,8 +7,10 @@ import { LoggerModule } from 'nestjs-pino';
 import { createPinoLoggerOptions } from '@app/shared';
 import { Order } from './orders/entities/order.entity';
 import { OutboxEvent } from './orders/entities/outbox-event.entity';
+import { User } from './users/entities/user.entity';
 import { OrdersModule } from './orders/orders.module';
 import { HealthModule } from './health/health.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -33,13 +35,14 @@ import { HealthModule } from './health/health.module';
         username: configService.get<string>('ORDERS_DB_USER'),
         password: configService.get<string>('ORDERS_DB_PASSWORD'),
         database: configService.get<string>('ORDERS_DB_NAME'),
-        entities: [Order, OutboxEvent],
+        entities: [Order, OutboxEvent, User],
         synchronize: true,
       }),
       inject: [ConfigService],
     }),
     OrdersModule,
     HealthModule,
+    UsersModule,
   ],
   providers: [
     {
