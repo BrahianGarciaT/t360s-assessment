@@ -26,10 +26,6 @@ import {
   getInventoryClientConfig,
   INVENTORY_TCP_CLIENT,
 } from './orders.constants';
-import {
-  CircuitOpenError,
-  InventoryCircuitBreaker,
-} from './inventory-circuit-breaker';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
@@ -53,7 +49,6 @@ export class OrdersService {
     @Inject(INVENTORY_TCP_CLIENT)
     private readonly inventoryClient: ClientProxy,
     private readonly configService: ConfigService,
-    private readonly circuitBreaker: InventoryCircuitBreaker,
     @InjectPinoLogger(OrdersService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -99,16 +94,10 @@ export class OrdersService {
 
   /**
    * Llama a `inventory.reserve` de forma síncrona a través de
-   * `INVENTORY_TCP_CLIENT`, con el intento TCP gateado por
-   * `circuitBreaker.execute()`. Mapea un rechazo resuelto a 409 y cualquier
-   * fallo de transporte/timeout (real o por circuito abierto) a 503 — el
-   * sistema nunca degrada en modo abierto (decisión de diseño #6, spec
-   * "Hard failure when inventory is unreachable"). Solo un fallo de
-   * transporte real dispara `releaseOrphanedReservation`: si el circuito
-   * está abierto, `CircuitOpenError` corta antes de cualquier intento TCP,
-   * por lo que no hay reserva huérfana que liberar. El branch de rechazo
-   * resuelto (`response.ok === false` → 409) vive fuera del breaker: nunca
-   * cuenta como fallo de transporte.
+   * `INVENTORY_TCP_CLIENT`. Mapea un rechazo resuelto a 409 y cualquier
+   * fallo de transporte/timeout a 503 — el sistema nunca degrada en modo
+   * abierto (decisión de diseño #6, spec
+   * "Hard failure when inventory is unreachable").
    */
   private async reserveStock(
     orderId: string,
@@ -127,23 +116,16 @@ export class OrdersService {
 
     let response: ReserveStockResponse;
     try {
-      response = await this.circuitBreaker.execute(() =>
-        firstValueFrom(
-          this.inventoryClient
-            .send<ReserveStockResponse, ReserveStockRequest>(
-              INVENTORY_PATTERNS.RESERVE,
-              request,
-            )
-            .pipe(timeout(this.inventoryConfig.sendTimeoutMs)),
-        ),
+      response = await firstValueFrom(
+        this.inventoryClient
+          .send<ReserveStockResponse, ReserveStockRequest>(
+            INVENTORY_PATTERNS.RESERVE,
+            request,
+          )
+          .pipe(timeout(this.inventoryConfig.sendTimeoutMs)),
       );
-    } catch (error) {
-      // No TCP attempt was made when the breaker short-circuits — nothing to
-      // release. Only a real transport failure can leave inventory holding
-      // an orphaned reservation.
-      if (!(error instanceof CircuitOpenError)) {
-        this.releaseOrphanedReservation(orderId, correlationId);
-      }
+    } catch {
+      this.releaseOrphanedReservation(orderId, correlationId);
       throw new ServiceUnavailableException(
         'Inventory service unavailable — order was not created',
       );
