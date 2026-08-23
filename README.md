@@ -408,9 +408,25 @@ Toda mutación real de una reserva (`held → committed`/`released`, incluida la
 | Resultado de `inventory.reserve` | HTTP |
 |---|---|
 | Stock insuficiente en uno o más items (`INSUFFICIENT_STOCK`) o `productId` desconocido (`UNKNOWN_PRODUCT`) | `409 Conflict` — el body incluye `reason` y `shortfalls[]` |
-| `inventory` no responde o el timeout se cumple (`INVENTORY_SEND_TIMEOUT_MS`, default 3000ms) | `503 Service Unavailable` — el sistema nunca degrada abierto: prefiere rechazar la orden antes que crearla sin garantía de stock |
+| `inventory` no responde, el timeout se cumple (`INVENTORY_SEND_TIMEOUT_MS`, default 3000ms), o el circuit breaker está abierto | `503 Service Unavailable` — el sistema nunca degrada abierto: prefiere rechazar la orden antes que crearla sin garantía de stock. Mismo contrato de respuesta en los tres casos, sin distinción observable para el cliente |
 
 Ver `test/e2e/inventory-reservation.e2e-spec.ts` para la prueba end-to-end de los cinco escenarios: stock insuficiente, `inventory` caído, commit en `CONFIRMED`, release en `CANCELLED` y auto-liberación por TTL.
+
+### Circuit breaker en la llamada síncrona a inventory
+
+La llamada TCP síncrona a `inventory.reserve` dentro de `reserveStock()` está protegida por un circuit breaker en memoria (`InventoryCircuitBreaker`), con tres estados (`closed` / `open` / `half-open`):
+
+- **Closed (normal)**: cada llamada se intenta contra `inventory` como siempre. Solo cuentan como falla las fallas de **transporte** (timeout, conexión rechazada) — una respuesta resuelta con `ok: false` (stock insuficiente) sigue siendo un `409 Conflict` de negocio y nunca incrementa el contador del breaker.
+- **Open (disparado)**: tras `INVENTORY_BREAKER_FAILURE_THRESHOLD` fallas de transporte consecutivas (default `5`), el breaker abre. Mientras está abierto, `reserveStock()` **no intenta ninguna llamada TCP** — falla rápido con el mismo `503 Service Unavailable` de siempre. Como no hubo intento de reserva, tampoco se dispara el release best-effort de reserva huérfana.
+- **Half-open (prueba de recuperación)**: pasados `INVENTORY_BREAKER_RESET_TIMEOUT_MS` (default `15000`ms) desde que abrió, el breaker admite **una sola** solicitud de prueba; cualquier solicitud concurrente mientras esa prueba está en curso sigue fallando rápido. Si la prueba tiene éxito, el breaker cierra y el contador de fallas se reinicia a cero; si falla, vuelve a abrir de inmediato y el reset timeout arranca de nuevo desde ese momento.
+
+Detalles operativos importantes:
+
+- **Estado por réplica, no compartido**: cada instancia de `orders` mantiene su propio breaker en memoria — no hay store compartido (Redis u otro). Con `N` réplicas de `orders`, una caída de `inventory` puede disparar hasta `N` breakers independientes, cada uno con su propio conteo y su propio reloj de reset.
+- **Solo logging, sin auditoría**: cada transición de estado (`closed→open`, `open→half-open`, `half-open→closed`, `half-open→open`) se loguea vía `pino` (nivel `warn` al abrir, `info` en las demás) y **no** se escribe hacia `audit` ni a ninguna colección de MongoDB — es un detalle operativo interno de `orders`, no un evento de negocio.
+- **Rollback / caveat conocido**: `parseIntEnv` solo acepta valores enteros `> 0` — poner `INVENTORY_BREAKER_FAILURE_THRESHOLD=0` (o negativo) **no desactiva** el breaker, cae en el default de `5`. Para desactivarlo efectivamente en caso de rollback, usar un valor muy alto (p. ej. `1000000`) o revertir el cambio.
+
+Ver `test/e2e/inventory-circuit-breaker.e2e-spec.ts` para la prueba end-to-end del disparo por fallas consecutivas, el fail-fast en estado abierto y la recuperación vía half-open.
 
 ---
 
@@ -477,6 +493,8 @@ Los headers sensibles (`x-api-key`) se redactan en los logs de acceso HTTP.
 | `INVENTORY_REAP_BATCH_SIZE` | Máximo de reservas expiradas liberadas por tick del reaper | `100` |
 | `INVENTORY_TCP_HOST` | Host del servicio inventory (para TCP, usado por orders) | `inventory` |
 | `INVENTORY_SEND_TIMEOUT_MS` | Timeout del `send()` TCP síncrono de orders hacia inventory al crear una orden, en ms | `3000` |
+| `INVENTORY_BREAKER_FAILURE_THRESHOLD` | Fallas de transporte consecutivas antes de que el circuit breaker de inventory abra (ver [Circuit breaker en la llamada síncrona a inventory](#circuit-breaker-en-la-llamada-síncrona-a-inventory)). Solo acepta enteros `> 0`; `0` o negativo cae en el default, **no** desactiva el breaker | `5` |
+| `INVENTORY_BREAKER_RESET_TIMEOUT_MS` | Tiempo en ms que el circuit breaker de inventory permanece abierto antes de pasar a half-open y admitir una solicitud de prueba | `15000` |
 
 ---
 
