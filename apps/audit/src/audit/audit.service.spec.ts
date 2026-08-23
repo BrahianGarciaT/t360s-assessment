@@ -112,7 +112,34 @@ describe('AuditService', () => {
         eventType: 'inventory.reserved',
         timestamp: inventoryEvent.timestamp,
         details: inventoryEvent.details,
+        metadata: undefined,
       });
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('persists the given metadata bare when present (e.g. correlationId)', async () => {
+      const eventWithMetadata = {
+        ...inventoryEvent,
+        metadata: { correlationId: 'corr-abc' },
+      };
+      saveMock.mockResolvedValue({ ...eventWithMetadata, _id: 'mongo-id-3' });
+
+      await service.createInventoryLog(
+        'inventory.reserved',
+        eventWithMetadata,
+      );
+
+      expect(modelConstructorMock).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { correlationId: 'corr-abc' } }),
+      );
+    });
+
+    it('persists successfully with metadata absent (Scenario: missing correlation id does not reject the audit event)', async () => {
+      saveMock.mockResolvedValue({ ...inventoryEvent, _id: 'mongo-id-4' });
+
+      await expect(
+        service.createInventoryLog('inventory.reserved', inventoryEvent),
+      ).resolves.toBeUndefined();
       expect(saveMock).toHaveBeenCalledTimes(1);
     });
 

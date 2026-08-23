@@ -55,6 +55,7 @@ export class AuditService {
       orderId: string;
       timestamp: Date;
       details?: Record<string, any>;
+      metadata?: Record<string, any>;
     },
   ): Promise<void> {
     try {
@@ -64,6 +65,7 @@ export class AuditService {
         eventType,
         timestamp: event.timestamp,
         details: event.details ?? null,
+        metadata: event.metadata,
       });
       await log.save();
     } catch (error) {

@@ -59,7 +59,11 @@ export class AuditController {
     @Payload() event: InventoryAuditEvent,
   ): Promise<void> {
     this.logger.info(
-      { eventId: event.eventId, orderId: event.orderId },
+      {
+        correlationId: event.metadata?.correlationId,
+        eventId: event.eventId,
+        orderId: event.orderId,
+      },
       'Received inventory.reserved event',
     );
     await this.auditService.createInventoryLog(
@@ -74,7 +78,11 @@ export class AuditController {
     @Payload() event: InventoryAuditEvent,
   ): Promise<void> {
     this.logger.info(
-      { eventId: event.eventId, orderId: event.orderId },
+      {
+        correlationId: event.metadata?.correlationId,
+        eventId: event.eventId,
+        orderId: event.orderId,
+      },
       'Received inventory.committed event',
     );
     await this.auditService.createInventoryLog(
@@ -89,7 +97,11 @@ export class AuditController {
     @Payload() event: InventoryAuditEvent,
   ): Promise<void> {
     this.logger.info(
-      { eventId: event.eventId, orderId: event.orderId },
+      {
+        correlationId: event.metadata?.correlationId,
+        eventId: event.eventId,
+        orderId: event.orderId,
+      },
       'Received inventory.released event',
     );
     await this.auditService.createInventoryLog(

@@ -26,6 +26,10 @@ export class InventoryAuditEvent {
   @IsObject()
   details?: Record<string, any>;
 
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, any>;
+
   @IsString()
   @IsNotEmpty()
   apiKey!: string;

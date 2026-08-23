@@ -177,3 +177,139 @@ describe('Order flow (e2e)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('Correlation id propagation into inventory audit trail (e2e)', () => {
+  const productId = 'prod-e2e-correlation-01';
+
+  const buildPayload = (userId: string) => ({
+    userId,
+    items: [
+      {
+        productId,
+        productName: 'Correlation Widget',
+        quantity: 1,
+        price: 9.99,
+      },
+    ],
+    notes: 'correlation id propagation e2e',
+  });
+
+  beforeAll(async () => {
+    const res = await inventoryApi.put(`/stock/${productId}`, {
+      quantity: 1000,
+    });
+    expect(res.status).toBe(200);
+  }, 30_000);
+
+  it('propagates x-correlation-id from POST /orders through inventory.reserved, inventory.committed, and order.status_changed rows', async () => {
+    const correlationId = 'e2e-corr-reserve-commit';
+
+    const createRes = await ordersApi.post(
+      '/orders',
+      buildPayload('user-e2e-correlation-01'),
+      { headers: { 'x-correlation-id': correlationId } },
+    );
+    expect(createRes.status).toBe(201);
+    const orderId: string = createRes.data.id;
+
+    await waitForAuditLogs(auditApi, orderId, 1, 20_000, 'inventory.reserved');
+
+    const confirmRes = await ordersApi.put(
+      `/orders/${orderId}/status`,
+      { status: 'CONFIRMED' },
+      { headers: { 'x-correlation-id': correlationId } },
+    );
+    expect(confirmRes.status).toBe(200);
+
+    await waitForAuditLogs(
+      auditApi,
+      orderId,
+      1,
+      20_000,
+      'inventory.committed',
+    );
+
+    const res = await auditApi.get(`/audit/${orderId}`);
+    expect(res.status).toBe(200);
+
+    const reservedLog = res.data.find(
+      (log: { eventType: string }) => log.eventType === 'inventory.reserved',
+    );
+    const committedLog = res.data.find(
+      (log: { eventType: string }) => log.eventType === 'inventory.committed',
+    );
+    const statusChangedLogs = res.data.filter(
+      (log: { eventType: string }) => log.eventType === 'order.status_changed',
+    );
+
+    expect(reservedLog.metadata?.correlationId).toBe(correlationId);
+    expect(committedLog.metadata?.correlationId).toBe(correlationId);
+    expect(statusChangedLogs.length).toBeGreaterThan(0);
+    statusChangedLogs.forEach(
+      (log: { metadata?: { correlationId?: string } }) => {
+        expect(log.metadata?.correlationId).toBe(correlationId);
+      },
+    );
+  }, 30_000);
+
+  it('propagates x-correlation-id through inventory.released when an order is cancelled', async () => {
+    const correlationId = 'e2e-corr-release';
+
+    const createRes = await ordersApi.post(
+      '/orders',
+      buildPayload('user-e2e-correlation-02'),
+      { headers: { 'x-correlation-id': correlationId } },
+    );
+    expect(createRes.status).toBe(201);
+    const orderId: string = createRes.data.id;
+
+    await waitForAuditLogs(auditApi, orderId, 1, 20_000, 'inventory.reserved');
+
+    const cancelRes = await ordersApi.put(
+      `/orders/${orderId}/status`,
+      { status: 'CANCELLED' },
+      { headers: { 'x-correlation-id': correlationId } },
+    );
+    expect(cancelRes.status).toBe(200);
+
+    const releasedLogs = await waitForAuditLogs(
+      auditApi,
+      orderId,
+      1,
+      20_000,
+      'inventory.released',
+    );
+
+    expect(
+      (releasedLogs[0] as { metadata?: { correlationId?: string } }).metadata
+        ?.correlationId,
+    ).toBe(correlationId);
+  }, 30_000);
+
+  it('auto-generates a correlation id when no x-correlation-id header is sent — inventory.reserved row still carries a defined non-empty id (not an error)', async () => {
+    const createRes = await ordersApi.post(
+      '/orders',
+      buildPayload('user-e2e-correlation-03'),
+    );
+    expect(createRes.status).toBe(201);
+    const orderId: string = createRes.data.id;
+
+    const reservedLogs = await waitForAuditLogs(
+      auditApi,
+      orderId,
+      1,
+      20_000,
+      'inventory.reserved',
+    );
+
+    const reservedLog = reservedLogs[0] as {
+      metadata?: { correlationId?: string };
+    };
+    // pino-http's genReqId auto-generates a UUID whenever the header is
+    // absent (see libs/shared/src/config/pino-logger.config.ts) — the
+    // request-level correlationId is therefore never truly undefined at the
+    // HTTP boundary, only server-generated instead of client-supplied.
+    expect(typeof reservedLog.metadata?.correlationId).toBe('string');
+    expect(reservedLog.metadata?.correlationId?.length).toBeGreaterThan(0);
+  }, 30_000);
+});

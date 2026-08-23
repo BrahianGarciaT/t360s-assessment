@@ -53,7 +53,11 @@ export class InventoryController {
       'Received inventory.commit_requested event',
     );
 
-    return this.inventoryService.commit(event.orderId, event.eventId);
+    return this.inventoryService.commit(
+      event.orderId,
+      event.eventId,
+      event.metadata,
+    );
   }
 
   @UseGuards(RpcApiKeyGuard)
@@ -79,6 +83,7 @@ export class InventoryController {
       event.orderId,
       event.eventId,
       event.reason ?? 'cancelled',
+      event.metadata,
     );
   }
 
