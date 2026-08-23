@@ -17,10 +17,6 @@ import {
 import { OrdersService } from './orders.service';
 import { OrdersRepository, OutboxEventFactory } from './orders.repository';
 import { INVENTORY_TCP_CLIENT } from './orders.constants';
-import {
-  CircuitOpenError,
-  InventoryCircuitBreaker,
-} from './inventory-circuit-breaker';
 import { Order } from './entities/order.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 
@@ -42,7 +38,6 @@ describe('OrdersService', () => {
   >;
   let inventoryClient: { send: jest.Mock };
   let configService: { get: jest.Mock };
-  let breaker: { execute: jest.Mock };
 
   const buildOrder = (overrides: Partial<Order> = {}): Order =>
     ({
@@ -73,12 +68,6 @@ describe('OrdersService', () => {
     };
     configService = { get: jest.fn().mockReturnValue('test-api-key') };
     (randomUUID as jest.Mock).mockReturnValue(GENERATED_ID);
-    // Default passthrough: delegates straight to the wrapped operation, so
-    // every pre-existing test keeps observing the exact same 503/409
-    // contract as before the breaker was wired in.
-    breaker = {
-      execute: jest.fn((operation: () => Promise<unknown>) => operation()),
-    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -86,7 +75,6 @@ describe('OrdersService', () => {
         { provide: OrdersRepository, useValue: repository },
         { provide: INVENTORY_TCP_CLIENT, useValue: inventoryClient },
         { provide: ConfigService, useValue: configService },
-        { provide: InventoryCircuitBreaker, useValue: breaker },
         {
           provide: getLoggerToken(OrdersService.name),
           useValue: { warn: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -288,62 +276,6 @@ describe('OrdersService', () => {
       await expect(service.createOrder(dto)).rejects.toThrow(ConflictException);
 
       expect(inventoryClient.send).toHaveBeenCalledTimes(1);
-    });
-
-    it('short-circuits with 503 when the circuit breaker is open, without attempting a TCP call or releasing an orphaned reservation', async () => {
-      // Would succeed (ok: true) if the breaker were bypassed — proves the
-      // 503 below comes from the breaker's short-circuit, not from a real
-      // transport failure.
-      inventoryClient.send.mockReturnValue(
-        of({ ok: true, orderId: GENERATED_ID, expiresAt: 'x' }),
-      );
-      breaker.execute.mockRejectedValueOnce(new CircuitOpenError());
-
-      await expect(service.createOrder(dto, 'corr-123')).rejects.toThrow(
-        ServiceUnavailableException,
-      );
-
-      expect(inventoryClient.send).not.toHaveBeenCalled();
-    });
-
-    it('does not count resolved ok:false responses as breaker failures (business rejections never trip the breaker)', async () => {
-      const breakerLogger = { warn: jest.fn(), info: jest.fn(), error: jest.fn() };
-      const realBreaker = new InventoryCircuitBreaker(
-        breakerLogger as unknown as ConstructorParameters<
-          typeof InventoryCircuitBreaker
-        >[0],
-      );
-      const executeSpy = jest.spyOn(realBreaker, 'execute');
-
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          OrdersService,
-          { provide: OrdersRepository, useValue: repository },
-          { provide: INVENTORY_TCP_CLIENT, useValue: inventoryClient },
-          { provide: ConfigService, useValue: configService },
-          { provide: InventoryCircuitBreaker, useValue: realBreaker },
-          {
-            provide: getLoggerToken(OrdersService.name),
-            useValue: { warn: jest.fn(), error: jest.fn(), info: jest.fn() },
-          },
-        ],
-      }).compile();
-      const realBreakerService = module.get<OrdersService>(OrdersService);
-
-      inventoryClient.send.mockReturnValue(
-        of({ ok: false, reason: 'INSUFFICIENT_STOCK', shortfalls: [] }),
-      );
-
-      // 10 > the breaker's threshold of 5 — if these counted as failures the
-      // breaker would already be open by call #6, and the response would
-      // flip from 409 to 503.
-      for (let i = 0; i < 10; i += 1) {
-        await expect(realBreakerService.createOrder(dto)).rejects.toThrow(
-          ConflictException,
-        );
-      }
-
-      expect(executeSpy).toHaveBeenCalledTimes(10);
     });
   });
 
