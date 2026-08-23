@@ -94,6 +94,39 @@ describe('InventoryService', () => {
       );
     });
 
+    it('propagates request.correlationId into the emitted audit event metadata', async () => {
+      const reservation = buildReservation();
+      repository.reserve.mockResolvedValue(reservation);
+
+      await service.reserve({
+        orderId: 'order-1',
+        items: [{ productId: 'p1', quantity: 2 }],
+        apiKey: 'test-api-key',
+        correlationId: 'corr-123',
+      });
+
+      expect(auditClient.emit).toHaveBeenCalledWith(
+        INVENTORY_AUDIT_EVENTS.RESERVED,
+        expect.objectContaining({ metadata: { correlationId: 'corr-123' } }),
+      );
+    });
+
+    it('omits metadata on the emitted audit event when request.correlationId is absent (triangulation)', async () => {
+      const reservation = buildReservation();
+      repository.reserve.mockResolvedValue(reservation);
+
+      await service.reserve({
+        orderId: 'order-1',
+        items: [{ productId: 'p1', quantity: 2 }],
+        apiKey: 'test-api-key',
+      });
+
+      expect(auditClient.emit).toHaveBeenCalledWith(
+        INVENTORY_AUDIT_EVENTS.RESERVED,
+        expect.objectContaining({ metadata: undefined }),
+      );
+    });
+
     it('is a no-op dedup (not an error) when orderId already exists (23505 unique violation)', async () => {
       const duplicateKeyError = Object.assign(new Error('duplicate key'), {
         code: '23505',
@@ -224,6 +257,24 @@ describe('InventoryService', () => {
       );
     });
 
+    it('forwards the passed metadata verbatim into the emitted audit event', async () => {
+      repository.finalize.mockResolvedValue(
+        buildReservation({
+          status: ReservationStatus.COMMITTED,
+          processedEventId: 'event-abc',
+        }),
+      );
+
+      await service.commit('order-1', 'event-abc', {
+        correlationId: 'corr-456',
+      });
+
+      expect(auditClient.emit).toHaveBeenCalledWith(
+        INVENTORY_AUDIT_EVENTS.COMMITTED,
+        expect.objectContaining({ metadata: { correlationId: 'corr-456' } }),
+      );
+    });
+
     it('is a no-op ack when the redelivered eventId was already processed (idempotent redelivery, triangulation)', async () => {
       repository.finalize.mockResolvedValue(
         buildReservation({
@@ -292,6 +343,24 @@ describe('InventoryService', () => {
       expect(auditClient.emit).toHaveBeenCalledWith(
         INVENTORY_AUDIT_EVENTS.RELEASED,
         expect.objectContaining({ orderId: 'order-1' }),
+      );
+    });
+
+    it('forwards the passed metadata verbatim into the emitted audit event', async () => {
+      repository.finalize.mockResolvedValue(
+        buildReservation({
+          status: ReservationStatus.RELEASED,
+          processedEventId: 'event-xyz',
+        }),
+      );
+
+      await service.release('order-1', 'event-xyz', 'cancelled', {
+        correlationId: 'corr-789',
+      });
+
+      expect(auditClient.emit).toHaveBeenCalledWith(
+        INVENTORY_AUDIT_EVENTS.RELEASED,
+        expect.objectContaining({ metadata: { correlationId: 'corr-789' } }),
       );
     });
 

@@ -52,6 +52,9 @@ export class InventoryService {
         eventId: randomUUID(),
         orderId: reservation.orderId,
         details: { items: request.items },
+        metadata: request.correlationId
+          ? { correlationId: request.correlationId }
+          : undefined,
       });
       return {
         ok: true,
@@ -96,6 +99,7 @@ export class InventoryService {
   async commit(
     orderId: string,
     eventId: string,
+    metadata?: Record<string, any>,
   ): Promise<{ ok: true; orderId: string }> {
     const reservation = await this.repository.finalize(
       orderId,
@@ -111,6 +115,7 @@ export class InventoryService {
       this.emitAuditEvent(INVENTORY_AUDIT_EVENTS.COMMITTED, {
         eventId,
         orderId,
+        metadata,
       });
     }
     return { ok: true, orderId };
@@ -120,6 +125,7 @@ export class InventoryService {
     orderId: string,
     eventId: string,
     reason: ReleasedReason,
+    metadata?: Record<string, any>,
   ): Promise<{ ok: true; orderId: string }> {
     const reservation = await this.repository.finalize(
       orderId,
@@ -137,6 +143,7 @@ export class InventoryService {
         eventId,
         orderId,
         details: { reason },
+        metadata,
       });
     }
     return { ok: true, orderId };
@@ -172,6 +179,7 @@ export class InventoryService {
       eventId: string;
       orderId: string;
       details?: Record<string, any>;
+      metadata?: Record<string, any>;
     },
   ): void {
     this.auditClient
@@ -180,6 +188,7 @@ export class InventoryService {
         orderId: payload.orderId,
         timestamp: new Date(),
         details: payload.details,
+        metadata: payload.metadata,
         apiKey: this.apiKey,
       })
       .subscribe({
