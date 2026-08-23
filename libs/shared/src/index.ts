@@ -1,4 +1,5 @@
 export * from './enums/order-status.enum';
+export * from './enums/role.enum';
 export * from './events/order-events';
 export * from './events/inventory-events';
 export * from './interfaces/order-event.interface';
@@ -8,4 +9,10 @@ export * from './constants/correlation-id';
 export * from './config/pino-logger.config';
 export * from './guards/api-key.guard';
 export * from './guards/rpc-api-key.guard';
+export * from './guards/jwt-auth.guard';
+export * from './guards/roles.guard';
+export * from './decorators/roles.decorator';
+export * from './decorators/current-user.decorator';
+export * from './auth/jwt-payload.interface';
+export * from './auth/shared-auth.module';
 export * from './utils/secure-compare';
