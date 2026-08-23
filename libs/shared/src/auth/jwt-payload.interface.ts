@@ -1,3 +1,4 @@
+import { Request } from 'express';
 import { Role } from '../enums/role.enum';
 
 export interface JwtPayload {
@@ -9,3 +10,7 @@ export interface JwtPayload {
 }
 
 export type AuthUser = Pick<JwtPayload, 'sub' | 'email' | 'role'>;
+
+export interface RequestWithUser extends Request {
+  user?: AuthUser;
+}
