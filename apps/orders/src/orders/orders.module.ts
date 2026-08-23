@@ -13,6 +13,7 @@ import { OutboxPurgeService } from './outbox-purge.service';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { AUDIT_TCP_CLIENT, INVENTORY_TCP_CLIENT } from './orders.constants';
+import { InventoryCircuitBreaker } from './inventory-circuit-breaker';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { AUDIT_TCP_CLIENT, INVENTORY_TCP_CLIENT } from './orders.constants';
     OutboxPollerService,
     OutboxPurgeService,
     ApiKeyGuard,
+    InventoryCircuitBreaker,
   ],
 })
 export class OrdersModule {}
